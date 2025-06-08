@@ -1,0 +1,368 @@
+//! MemvidEncoder - Main encoding API
+//!
+//! This provides the high-level interface for encoding text documents into QR code videos.
+
+use crate::config::Config;
+use crate::error::{MemvidError, Result};
+use crate::storage::EncodingStats;
+use crate::text::{TextChunker, ChunkingStrategy, ChunkMetadata, PdfProcessor};
+use crate::qr::QrEncoder;
+use crate::video::encoder::VideoEncoder;
+use std::path::Path;
+use regex;
+
+/// Main encoder for creating QR code videos from text documents
+pub struct MemvidEncoder {
+    config: Config,
+    chunks: Vec<ChunkMetadata>,
+    qr_encoder: QrEncoder,
+    text_chunker: TextChunker,
+    video_encoder: VideoEncoder,
+}
+
+impl MemvidEncoder {
+    /// Create a new encoder with optional configuration
+    pub async fn new(config: Option<Config>) -> Result<Self> {
+        let config = config.unwrap_or_default();
+        
+        let qr_encoder = QrEncoder::new(config.qr.clone());
+        let text_chunker = TextChunker::new(
+            config.chunking.clone(),
+            ChunkingStrategy::Character,
+        )?;
+        let video_encoder = VideoEncoder::new(config.video.clone());
+        
+        Ok(Self {
+            config,
+            chunks: Vec::new(),
+            qr_encoder,
+            text_chunker,
+            video_encoder,
+        })
+    }
+
+    /// Add text content with custom chunk size and overlap
+    pub async fn add_text(&mut self, text: &str, chunk_size: usize, overlap: usize) -> Result<()> {
+        let mut custom_config = self.config.chunking.clone();
+        custom_config.chunk_size = chunk_size;
+        custom_config.overlap = overlap;
+        
+        let custom_chunker = TextChunker::new(custom_config, ChunkingStrategy::Character)?;
+        let mut new_chunks = custom_chunker.chunk_text(text, None)?;
+        
+        // Update chunk IDs to be sequential
+        let start_id = self.chunks.len();
+        for (i, chunk) in new_chunks.iter_mut().enumerate() {
+            chunk.id = start_id + i;
+        }
+        
+        let chunk_count = new_chunks.len();
+        self.chunks.extend(new_chunks);
+        log::info!("Added {} chunks from text. Total: {}", 
+                  chunk_count, self.chunks.len());
+        
+        Ok(())
+    }
+
+    /// Add PDF document content
+    pub async fn add_pdf<P: AsRef<Path>>(&mut self, pdf_path: P) -> Result<()> {
+        let path = pdf_path.as_ref();
+        
+        if !path.exists() {
+            return Err(MemvidError::Pdf(format!("PDF file not found: {}", path.display())));
+        }
+
+        let text = PdfProcessor::extract_text(path)?;
+        let source = Some(path.to_string_lossy().to_string());
+        
+        let mut new_chunks = self.text_chunker.chunk_text(&text, source)?;
+        
+        // Update chunk IDs to be sequential
+        let start_id = self.chunks.len();
+        for (i, chunk) in new_chunks.iter_mut().enumerate() {
+            chunk.id = start_id + i;
+        }
+        
+        let chunk_count = new_chunks.len();
+        self.chunks.extend(new_chunks);
+        log::info!("Added {} chunks from PDF {}. Total: {}", 
+                  chunk_count, path.display(), self.chunks.len());
+        
+        Ok(())
+    }
+
+    /// Add plain text file content
+    pub async fn add_text_file<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
+        let path = file_path.as_ref();
+        let text = std::fs::read_to_string(path)
+            .map_err(MemvidError::Io)?;
+        
+        let source = Some(path.to_string_lossy().to_string());
+        let mut new_chunks = self.text_chunker.chunk_text(&text, source)?;
+        
+        // Update chunk IDs to be sequential
+        let start_id = self.chunks.len();
+        for (i, chunk) in new_chunks.iter_mut().enumerate() {
+            chunk.id = start_id + i;
+        }
+        
+        let chunk_count = new_chunks.len();
+        self.chunks.extend(new_chunks);
+        log::info!("Added {} chunks from text file {}. Total: {}", 
+                  chunk_count, path.display(), self.chunks.len());
+        
+        Ok(())
+    }
+
+    /// Add markdown file content
+    pub async fn add_markdown_file<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
+        let content = std::fs::read_to_string(file_path)
+            .map_err(MemvidError::Io)?;
+        
+        // Extract text content from markdown
+        let text = self.extract_text_from_markdown(&content);
+        
+        // Use the configured chunking settings from config
+        let chunk_size = self.config.chunking.chunk_size;
+        let overlap = self.config.chunking.overlap;
+        
+        self.add_text(&text, chunk_size, overlap).await
+    }
+
+    /// Build the video from all added chunks
+    pub async fn build_video(&mut self, output_file: &str, index_file: &str) -> Result<EncodingStats> {
+        if self.chunks.is_empty() {
+            return Err(MemvidError::Generic("No chunks added for encoding".to_string()));
+        }
+
+        let start_time = std::time::Instant::now();
+
+        log::info!("Starting video encoding for {} chunks", self.chunks.len());
+
+        // Generate QR code frames
+        log::info!("Generating QR code frames...");
+        let mut qr_images = Vec::new();
+        
+        for (frame_num, chunk) in self.chunks.iter_mut().enumerate() {
+            let qr_frame = self.qr_encoder.encode_text(&chunk.text)?;
+            qr_images.push(qr_frame.image);
+            
+            // Update chunk with frame number
+            chunk.frame = Some(frame_num as u32);
+            
+            if frame_num % 100 == 0 {
+                log::info!("Generated {} QR frames", frame_num + 1);
+            }
+        }
+
+        log::info!("Generated {} QR frames, encoding video...", qr_images.len());
+
+        // Encode video using VideoEncoder
+        self.video_encoder.encode_frames(&qr_images, output_file).await?;
+
+        // Get file size
+        let video_file_size = std::fs::metadata(output_file)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        // Save index to SQLite database
+        self.save_index(index_file).await?;
+
+        let processing_time = start_time.elapsed().as_secs_f64();
+        
+        log::info!(
+            "Video encoding completed: {} chunks → {} frames → {} MB in {:.2}s",
+            self.chunks.len(),
+            qr_images.len(),
+            video_file_size as f64 / 1_048_576.0,
+            processing_time
+        );
+
+        Ok(EncodingStats {
+            total_chunks: self.chunks.len(),
+            total_frames: qr_images.len(),
+            processing_time,
+            video_file_size,
+        })
+    }
+
+    /// Build video with progress callback
+    pub async fn build_video_with_progress<F>(
+        &mut self, 
+        output_file: &str, 
+        index_file: &str,
+        progress_callback: F
+    ) -> Result<EncodingStats>
+    where
+        F: Fn(f32),
+    {
+        if self.chunks.is_empty() {
+            return Err(MemvidError::Generic("No chunks added for encoding".to_string()));
+        }
+
+        let start_time = std::time::Instant::now();
+        let total_chunks = self.chunks.len();
+
+        progress_callback(0.0);
+
+        // Generate QR code frames with progress
+        log::info!("Generating QR code frames...");
+        let mut qr_images = Vec::new();
+        
+        for (frame_num, chunk) in self.chunks.iter_mut().enumerate() {
+            let qr_frame = self.qr_encoder.encode_text(&chunk.text)?;
+            qr_images.push(qr_frame.image);
+            
+            chunk.frame = Some(frame_num as u32);
+            
+            // Update progress (QR generation is ~50% of total work)
+            let qr_progress = (frame_num + 1) as f32 / total_chunks as f32 * 50.0;
+            progress_callback(qr_progress);
+        }
+
+        progress_callback(50.0);
+
+        // Encode video
+        log::info!("Encoding video...");
+        self.video_encoder.encode_frames(&qr_images, output_file).await?;
+        
+        progress_callback(90.0);
+
+        // Save index to SQLite database
+        self.save_index(index_file).await?;
+        
+        progress_callback(100.0);
+
+        let processing_time = start_time.elapsed().as_secs_f64();
+        let video_file_size = std::fs::metadata(output_file)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        Ok(EncodingStats {
+            total_chunks: self.chunks.len(),
+            total_frames: qr_images.len(),
+            processing_time,
+            video_file_size,
+        })
+    }
+
+    /// Save chunk index to SQLite database
+    async fn save_index(&self, database_file: &str) -> Result<()> {
+        // Create parent directory if needed
+        if let Some(parent) = Path::new(database_file).parent() {
+            std::fs::create_dir_all(parent).map_err(MemvidError::Io)?;
+        }
+        
+        let mut database = crate::storage::Database::new(database_file)?;
+        database.insert_chunks(&self.chunks)?;
+        
+        let stats = database.get_stats()?;
+        log::info!("Saved {} chunks to SQLite database {} ({} bytes)", 
+                  stats.chunk_count, database_file, stats.file_size_bytes);
+        Ok(())
+    }
+
+    /// Clear all chunks
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+        log::info!("Cleared all chunks");
+    }
+
+    /// Get encoding statistics
+    pub fn get_stats(&self) -> EncodingStats {
+        EncodingStats {
+            total_chunks: self.chunks.len(),
+            total_frames: self.chunks.iter().filter(|c| c.frame.is_some()).count(),
+            processing_time: 0.0,
+            video_file_size: 0,
+        }
+    }
+
+    /// Get current chunk count
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// Get configuration
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Extract text from markdown content
+    fn extract_text_from_markdown(&self, content: &str) -> String {
+        // Basic markdown parsing - remove markdown syntax and keep text content
+        let mut text = content.to_string();
+        
+        // Remove code blocks (``` or `)
+        text = regex::Regex::new(r"```[\s\S]*?```").unwrap().replace_all(&text, " ").to_string();
+        text = regex::Regex::new(r"`[^`]*`").unwrap().replace_all(&text, " ").to_string();
+        
+        // Remove headers (# ## ### etc)
+        text = regex::Regex::new(r"^#{1,6}\s+").unwrap().replace_all(&text, "").to_string();
+        
+        // Remove links [text](url) -> text
+        text = regex::Regex::new(r"\[([^\]]*)\]\([^\)]*\)").unwrap().replace_all(&text, "$1").to_string();
+        
+        // Remove images ![alt](url)
+        text = regex::Regex::new(r"!\[[^\]]*\]\([^\)]*\)").unwrap().replace_all(&text, " ").to_string();
+        
+        // Remove emphasis **bold** *italic* -> text
+        text = regex::Regex::new(r"\*\*([^\*]*)\*\*").unwrap().replace_all(&text, "$1").to_string();
+        text = regex::Regex::new(r"\*([^\*]*)\*").unwrap().replace_all(&text, "$1").to_string();
+        text = regex::Regex::new(r"__([^_]*)__").unwrap().replace_all(&text, "$1").to_string();
+        text = regex::Regex::new(r"_([^_]*)_").unwrap().replace_all(&text, "$1").to_string();
+        
+        // Remove horizontal rules
+        text = regex::Regex::new(r"^---+$").unwrap().replace_all(&text, " ").to_string();
+        text = regex::Regex::new(r"^\*\*\*+$").unwrap().replace_all(&text, " ").to_string();
+        
+        // Remove HTML tags
+        text = regex::Regex::new(r"<[^>]*>").unwrap().replace_all(&text, " ").to_string();
+        
+        // Clean up whitespace
+        text = regex::Regex::new(r"\s+").unwrap().replace_all(&text, " ").to_string();
+        text = text.trim().to_string();
+        
+        text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+    use std::io::Write;
+
+    #[tokio::test]
+    async fn test_encoder_creation() {
+        let encoder = MemvidEncoder::new(None).await.unwrap();
+        assert_eq!(encoder.chunk_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_add_text() {
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        encoder.add_text("Hello, World!", 1024, 32).await.unwrap();
+        assert_eq!(encoder.chunk_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_add_text_file() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "This is test content").unwrap();
+
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        encoder.add_text_file(temp_file.path()).await.unwrap();
+        assert!(encoder.chunk_count() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_clear() {
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        encoder.add_text("Test content", 1024, 32).await.unwrap();
+        assert!(encoder.chunk_count() > 0);
+        
+        encoder.clear();
+        assert_eq!(encoder.chunk_count(), 0);
+    }
+} 
