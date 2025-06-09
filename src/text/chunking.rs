@@ -453,4 +453,100 @@ mod tests {
         let deserialized: ChunkMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(chunk, deserialized);
     }
+
+    #[test]
+    fn test_python_equivalent_chunk_text() {
+        // Equivalent to Python test_chunk_text
+        let chunker = TextChunker::with_default_config().unwrap();
+        let text = "This is sentence one. This is sentence two. This is sentence three. This is sentence four.";
+        
+        let chunks = chunker.chunk_text(text, Some("test_doc".to_string())).unwrap();
+        
+        // Verify we got chunks
+        assert!(!chunks.is_empty());
+        
+        // Verify all chunks have content
+        for chunk in &chunks {
+            assert!(!chunk.text.is_empty());
+            assert_eq!(chunk.source, Some("test_doc".to_string()));
+            assert!(chunk.length > 0);
+        }
+        
+        // Verify chunk IDs are sequential
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert_eq!(chunk.id, i);
+        }
+    }
+
+    #[test]
+    fn test_python_equivalent_long_text() {
+        // Test with longer text like Python version
+        let config = ChunkingConfig {
+            chunk_size: 100,
+            overlap: 20,
+            min_chunk_size: 10,
+            max_chunk_size: 4096,
+        };
+        let chunker = TextChunker::new(config, ChunkingStrategy::Character).unwrap();
+        
+        let text = "This is a test. ".repeat(50); // 800 characters
+        let chunks = chunker.chunk_text(&text, Some("long_doc".to_string())).unwrap();
+        
+        // Should have multiple chunks due to size
+        assert!(chunks.len() > 1);
+        
+        // Verify overlap is working
+        if chunks.len() > 1 {
+            let first_chunk = &chunks[0];
+            let second_chunk = &chunks[1];
+            
+            // There should be some overlap in content
+            let first_end = &first_chunk.text[first_chunk.text.len().saturating_sub(20)..];
+            assert!(second_chunk.text.contains(first_end.trim()));
+        }
+    }
+
+    #[test]
+    fn test_python_equivalent_metadata_preservation() {
+        // Test that metadata is preserved correctly
+        let chunker = TextChunker::with_default_config().unwrap();
+        let text = "Short text for metadata test.";
+        
+        let chunks = chunker.chunk_text(text, Some("metadata_test".to_string())).unwrap();
+        
+        assert_eq!(chunks.len(), 1);
+        let chunk = &chunks[0];
+        
+        assert_eq!(chunk.id, 0);
+        assert_eq!(chunk.text, text);
+        assert_eq!(chunk.source, Some("metadata_test".to_string()));
+        assert_eq!(chunk.offset, 0);
+        assert_eq!(chunk.length, text.len());
+        assert_eq!(chunk.page, None);
+        assert_eq!(chunk.frame, None);
+        assert_eq!(chunk.embedding, None);
+    }
+
+    #[test]
+    fn test_python_equivalent_sentence_chunking() {
+        // Test sentence-aware chunking
+        let config = ChunkingConfig {
+            chunk_size: 50,  // Small size to force multiple chunks
+            overlap: 10,
+            min_chunk_size: 10,
+            max_chunk_size: 4096,
+        };
+        let chunker = TextChunker::new(config, ChunkingStrategy::Sentence).unwrap();
+        
+        let text = "First sentence here. Second sentence is longer than the first. Third sentence completes the test.";
+        let chunks = chunker.chunk_text(text, Some("sentence_test".to_string())).unwrap();
+        
+        // Should preserve sentence boundaries where possible
+        for chunk in &chunks {
+            // Verify chunks are not empty and have reasonable content
+            let text = chunk.text.trim();
+            assert!(!text.is_empty());
+            assert!(text.len() > 0);
+        }
+    }
 } 

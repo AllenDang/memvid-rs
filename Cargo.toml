@@ -2,10 +2,10 @@
 name = "memvid-rs"
 version = "0.1.0"
 edition = "2024"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["AllenDang <allengnr@gmail.com>"]
 description = "High-performance QR code video encoding for text storage and semantic retrieval"
 license = "MIT"
-repository = "https://github.com/yourusername/memvid-rs"
+repository = "https://github.com/AllenDang/memvid-rs"
 keywords = ["qr", "video", "search", "encoding", "ai"]
 categories = ["multimedia::video", "text-processing", "database"]
 
@@ -98,9 +98,8 @@ metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 name = "memvid-rs"
 path = "src/main.rs"
 
-[[example]]
-name = "basic_encoding"
-path = "examples/basic_encoding.rs"
+# All examples have been moved to integration tests in tests/ directory
+# Run with: cargo test
 
 [lib]
 name = "memvid_rs"

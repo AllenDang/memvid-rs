@@ -325,6 +325,28 @@ impl MemvidEncoder {
         
         text
     }
+
+    /// Add pre-chunked text content directly
+    pub fn add_chunks(&mut self, chunks: Vec<String>) -> Result<()> {
+        let start_id = self.chunks.len();
+        
+        for (i, text) in chunks.iter().enumerate() {
+            let chunk = ChunkMetadata {
+                id: start_id + i,
+                text: text.clone(),
+                source: None,
+                page: None,
+                offset: 0,
+                length: text.len(),
+                frame: None,
+                embedding: None,
+            };
+            self.chunks.push(chunk);
+        }
+        
+        log::info!("Added {} chunks directly. Total: {}", chunks.len(), self.chunks.len());
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -364,5 +386,88 @@ mod tests {
         
         encoder.clear();
         assert_eq!(encoder.chunk_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_add_chunks_direct() {
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        let chunks = vec![
+            "chunk1".to_string(),
+            "chunk2".to_string(), 
+            "chunk3".to_string()
+        ];
+        
+        encoder.add_chunks(chunks.clone()).unwrap();
+        
+        assert_eq!(encoder.chunk_count(), 3);
+        assert_eq!(encoder.chunks[0].text, "chunk1");
+        assert_eq!(encoder.chunks[1].text, "chunk2");
+        assert_eq!(encoder.chunks[2].text, "chunk3");
+    }
+
+    #[tokio::test]
+    async fn test_add_text_chunking() {
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        let text = "This is a test. ".repeat(50); // 800 characters
+        
+        encoder.add_text(&text, 100, 20).await.unwrap();
+        
+        assert!(encoder.chunk_count() > 1);
+        // Verify no empty chunks
+        for chunk in &encoder.chunks {
+            assert!(!chunk.text.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_build_video_integration() {
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        let chunks = vec![
+            "Test chunk 1: Important information".to_string(),
+            "Test chunk 2: More data here".to_string(),
+            "Test chunk 3: Final piece of info".to_string()
+        ];
+        encoder.add_chunks(chunks).unwrap();
+        
+        // Create temporary directory for test files
+        let temp_dir = tempfile::tempdir().unwrap();
+        let video_file = temp_dir.path().join("test.mp4");
+        let index_file = temp_dir.path().join("test_index.db");
+        
+        // Build video
+        let stats = encoder.build_video(
+            video_file.to_str().unwrap(),
+            index_file.to_str().unwrap()
+        ).await.unwrap();
+        
+        // Check files exist
+        assert!(video_file.exists());
+        assert!(index_file.exists());
+        
+        // Check stats
+        assert_eq!(stats.total_chunks, 3);
+        assert_eq!(stats.total_frames, 3);
+        assert!(stats.video_file_size > 0);
+        assert!(stats.processing_time > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_encoder_stats_detailed() {
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        let chunks = vec![
+            "short".to_string(),
+            "medium length chunk".to_string(),
+            "this is a longer chunk with more text".to_string()
+        ];
+        encoder.add_chunks(chunks.clone()).unwrap();
+        
+        let stats = encoder.get_stats();
+        assert_eq!(stats.total_chunks, 3);
+        
+        let total_chars: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(stats.total_chunks, 3);
+        
+        let avg_chunk_size = total_chars as f64 / chunks.len() as f64;
+        assert!(avg_chunk_size > 0.0);
     }
 } 

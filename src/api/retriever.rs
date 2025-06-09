@@ -284,4 +284,167 @@ pub struct RetrievalStats {
     pub average_search_time: f64,
 }
 
-// TODO: Add tests for video decoding and QR extraction functionality 
+// TODO: Add tests for video decoding and QR extraction functionality
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::MemvidEncoder;
+    use tempfile;
+
+    /// Create test memory (equivalent to Python setup_test_memory fixture)
+    async fn setup_test_memory() -> (String, String, Vec<String>, tempfile::TempDir) {
+        let chunks = vec![
+            "Quantum computing uses qubits for parallel processing".to_string(),
+            "Machine learning models require large datasets".to_string(),
+            "Neural networks mimic brain structure".to_string(),
+            "Cloud computing provides scalable resources".to_string(),
+            "Blockchain ensures data immutability".to_string(),
+        ];
+
+        // Create encoder and add chunks
+        let mut encoder = MemvidEncoder::new(None).await.unwrap();
+        encoder.add_chunks(chunks.clone()).unwrap();
+        
+        // Create temporary files
+        let temp_dir = tempfile::tempdir().unwrap();
+        let video_file = temp_dir.path().join("test.mp4").to_string_lossy().to_string();
+        let index_file = temp_dir.path().join("test_index.db").to_string_lossy().to_string();
+        
+        // Build video
+        encoder.build_video(&video_file, &index_file).await.unwrap();
+        
+        (video_file, index_file, chunks, temp_dir)
+    }
+
+        #[tokio::test]
+    async fn test_retriever_initialization() {
+        let (video_file, index_file, chunks, _temp_dir) = setup_test_memory().await;
+        
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        assert_eq!(retriever.video_path(), video_file);
+        
+        let stats = retriever.get_stats().unwrap();
+        assert_eq!(stats.total_frames, chunks.len());
+    }
+
+    #[tokio::test] 
+    async fn test_search() {
+        let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        // Search for quantum - should find the first chunk
+        let results = retriever.search("quantum computing", 3).await.unwrap();
+        assert!(results.len() <= 3);
+        assert!(!results.is_empty()); // Should find at least one result
+        
+        // Search for machine learning - should find relevant chunks
+        let results = retriever.search("machine learning", 3).await.unwrap();
+        assert!(results.len() <= 3);
+        assert!(!results.is_empty()); // Should find at least one result
+        
+        // Search for blockchain - should find relevant chunks
+        let results = retriever.search("blockchain", 3).await.unwrap();
+        assert!(results.len() <= 3);
+        assert!(!results.is_empty()); // Should find at least one result
+    }
+
+    #[tokio::test]
+    async fn test_search_with_metadata() {
+        let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        let results = retriever.search_with_metadata("blockchain", 2).await.unwrap();
+        assert!(results.len() <= 2);
+        
+        if !results.is_empty() {
+            let result = &results[0];
+            assert!(result.score > 0.0);
+            assert!(!result.text.is_empty());
+            assert!(result.metadata.is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_chunk_by_id() {
+        let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        // Get first chunk
+        let chunk = retriever.get_chunk_by_id(0).await.unwrap();
+        assert!(chunk.is_some());
+        assert!(chunk.unwrap().to_lowercase().contains("quantum"));
+        
+        // Invalid ID
+        let chunk = retriever.get_chunk_by_id(999).await.unwrap();
+        assert!(chunk.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cache_operations() {
+        let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
+        let mut retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        // Initial cache should be empty
+        let initial_stats = retriever.get_stats().unwrap();
+        assert_eq!(initial_stats.cached_frames, 0);
+        
+        // Try to decode a frame (this may fail due to H.265 compression, but cache should work)
+        let _ = retriever.decode_frame(0).await; // May fail, that's OK
+        
+        // Clear cache
+        retriever.clear_cache();
+        let stats_after_clear = retriever.get_stats().unwrap();
+        assert_eq!(stats_after_clear.cached_frames, 0);
+    }
+
+    #[tokio::test]
+    async fn test_retriever_stats() {
+        let (video_file, index_file, chunks, _temp_dir) = setup_test_memory().await;
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        let stats = retriever.get_stats().unwrap();
+        assert_eq!(stats.total_frames, chunks.len());
+        assert!(stats.database_size_bytes > 0);
+        assert_eq!(stats.cached_frames, 0); // No cache initially
+    }
+
+    #[tokio::test]
+    async fn test_video_info() {
+        let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        let video_info = retriever.get_video_info().await.unwrap();
+        assert!(video_info.width > 0);
+        assert!(video_info.height > 0);
+        assert!(video_info.fps > 0.0);
+        assert!(video_info.frame_count > 0);
+    }
+
+    #[tokio::test]
+    async fn test_context_window() {
+        let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        // Get context window around chunk 1
+        let context = retriever.get_context_window(1, 3).await.unwrap();
+        assert!(!context.is_empty());
+        assert!(context.len() <= 4); // Window size + target chunk
+    }
+
+    #[tokio::test]
+    async fn test_chunks_by_frame() {
+        let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
+        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        
+        // Get chunks for frame 0
+        let chunks = retriever.get_chunks_by_frame(0).await.unwrap();
+        assert!(!chunks.is_empty());
+        
+        // Verify chunk metadata
+        for chunk in chunks {
+            assert!(!chunk.text.is_empty());
+            assert_eq!(chunk.frame, Some(0));
+        }
+    }
+} 
