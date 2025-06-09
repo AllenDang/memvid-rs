@@ -122,7 +122,7 @@ async fn test_search_functionality() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     // Test search
-    let retriever = MemvidRetriever::new(
+    let mut retriever = MemvidRetriever::new(
         video_path.to_str().unwrap(),
         database_path.to_str().unwrap(),
     ).await?;

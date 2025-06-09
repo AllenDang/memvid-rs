@@ -81,7 +81,7 @@ async fn test_retriever_functionality() -> Result<(), Box<dyn std::error::Error>
     ).await?;
     
     // Test retriever initialization (equivalent to Python MemvidRetriever)
-    let retriever = MemvidRetriever::new(
+    let mut retriever = MemvidRetriever::new(
         video_file.to_str().unwrap(),
         index_file.to_str().unwrap()
     ).await?;

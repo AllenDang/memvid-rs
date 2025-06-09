@@ -44,7 +44,6 @@ byteorder = "1.5"          # Binary data handling
 # Vector search - PRODUCTION-READY SEARCH ENGINE
 hnsw_rs = "0.3"            # High-performance HNSW implementation
 instant-distance = "0.6"   # Fast approximate nearest neighbor search
-# faiss = { version = "0.12", optional = true }  # Optional FAISS bindings for comparison - commented out for now
 
 # Database storage - Built-in by default
 rusqlite = { version = "0.32", features = ["bundled"] }  # Embedded SQLite database - zero system deps
@@ -76,6 +75,12 @@ env_logger = "0.11"
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# OpenAI API client
+async-openai = "0.25"
+
 # Progress bars
 indicatif = "0.17"
 
@@ -92,14 +97,20 @@ approx = "0.5"       # Floating point comparisons for ML tests
 default = ["metal"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
-# faiss-backend = ["faiss"]  # Optional FAISS support - commented out for now
+
 
 [[bin]]
 name = "memvid-rs"
 path = "src/main.rs"
 
-# All examples have been moved to integration tests in tests/ directory
-# Run with: cargo test
+# Examples
+[[example]]
+name = "simple_chat"
+path = "examples/simple_chat.rs"
+
+[[example]]
+name = "ollama_chat"
+path = "examples/ollama_chat.rs"
 
 [lib]
 name = "memvid_rs"

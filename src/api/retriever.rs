@@ -8,6 +8,7 @@ use crate::storage::Database;
 use crate::video::{VideoDecoder, VideoInfo};
 use crate::qr::QrDecoder;
 use crate::text::ChunkMetadata;
+use crate::ml::{EmbeddingModel, EmbeddingConfig, IndexManager};
 use std::path::Path;
 use std::collections::HashMap;
 
@@ -33,6 +34,8 @@ pub struct MemvidRetriever {
     video_decoder: VideoDecoder,
     qr_decoder: QrDecoder,
     frame_cache: HashMap<u32, String>, // Cache decoded frames
+    embedding_model: EmbeddingModel,
+    index_manager: Option<IndexManager>,
 }
 
 impl MemvidRetriever {
@@ -68,6 +71,10 @@ impl MemvidRetriever {
         // Initialize QR decoder
         let qr_decoder = QrDecoder::new();
         
+        // Initialize embedding model for semantic search
+        let embedding_config = EmbeddingConfig::default();
+        let embedding_model = EmbeddingModel::new(embedding_config).await?;
+        
         log::info!("MemvidRetriever initialized for {} with database {}", video_path, database_path);
         
         Ok(Self {
@@ -78,44 +85,151 @@ impl MemvidRetriever {
             video_decoder,
             qr_decoder,
             frame_cache: HashMap::new(),
+            embedding_model,
+            index_manager: None,
         })
     }
 
-    /// Search for relevant chunks using database text search
-    pub async fn search(&self, query: &str, top_k: usize) -> Result<Vec<(f32, String)>> {
+    /// Search in the video content using semantic similarity
+    pub async fn search(&mut self, query: &str, top_k: usize) -> Result<Vec<(f32, String)>> {
         log::info!("Searching for: '{}' (top {})", query, top_k);
         
-        // Use database text search for now (will upgrade to semantic search later)
-        let chunks = self.database.search_chunks(query, top_k)?;
+        // Generate embedding for the query
+        let query_embedding = self.embedding_model.encode(query)?;
         
-        let mut results = Vec::new();
-        for chunk in chunks {
-            // Score based on query relevance (simple substring match for now)
-            let score = if chunk.text.to_lowercase().contains(&query.to_lowercase()) {
-                1.0
-            } else {
-                0.5
-            };
+        // If we have an index manager, use semantic search
+        if let Some(ref index_manager) = self.index_manager {
+            log::info!("🧠 Using TRUE SEMANTIC SEARCH with IndexManager for query: '{}'", query);
+            let search_results = index_manager.search(&query_embedding, top_k)?;
+            let mut results = Vec::new();
             
-            results.push((score, chunk.text));
+            for result in search_results {
+                if let Some(chunk) = index_manager.get_chunk_by_id(result.id) {
+                    let score = 1.0 - result.distance; // Convert distance to similarity score
+                    results.push((score, chunk.text.clone()));
+                }
+            }
+            
+            log::info!("Found {} TRUE SEMANTIC results for query '{}'", results.len(), query);
+            return Ok(results);
+        }
+
+        // Check if chunks have stored embeddings for true semantic search
+        let all_chunks = self.database.search_chunks("", top_k * 10)?; // Get a sample of chunks to check
+        let chunks_with_embeddings: Vec<_> = all_chunks.iter()
+            .filter(|chunk| chunk.embedding.is_some())
+            .collect();
+        
+        if chunks_with_embeddings.is_empty() {
+            log::warn!("❌ NO SEMANTIC EMBEDDINGS FOUND: The database contains no stored embeddings for semantic search");
+            log::warn!("💡 SOLUTION: Re-encode the video with embedding generation enabled, or use a system with IndexManager");
+            log::warn!("🚫 REFUSING to fall back to keyword search as it may provide misleading results");
+            return Err(crate::error::MemvidError::MachineLearning(
+                "No semantic embeddings available in database. Refusing keyword fallback to avoid misleading results. Please re-encode video with embeddings enabled.".to_string()
+            ));
+        }
+
+        log::info!("🧠 Using TRUE SEMANTIC SEARCH with stored embeddings for query: '{}'", query);
+        
+        // Get all chunks with embeddings for semantic comparison
+        let chunks_with_embeddings = self.database.search_chunks("", top_k * 50)?; // Get more chunks for better coverage
+        let valid_chunks: Vec<_> = chunks_with_embeddings.into_iter()
+            .filter(|chunk| chunk.embedding.is_some())
+            .collect();
+        
+        if valid_chunks.is_empty() {
+            return Ok(vec![]);
         }
         
+        let mut results = Vec::new();
+        
+        for chunk in valid_chunks {
+            if let Some(ref chunk_embedding) = chunk.embedding {
+                let similarity = self.compute_cosine_similarity(&query_embedding, chunk_embedding);
+                results.push((similarity, chunk.text));
+            }
+        }
+        
+        // Sort by similarity score (descending) and take top_k
+        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        results.truncate(top_k);
+        
+        log::info!("📊 TRUE SEMANTIC RESULTS: Found {} embedding-based results for query '{}'", results.len(), query);
         log::info!("Found {} results for query '{}'", results.len(), query);
         Ok(results)
     }
 
-    /// Search with full metadata
-    pub async fn search_with_metadata(&self, query: &str, top_k: usize) -> Result<Vec<SearchResult>> {
+    /// Search with full metadata using semantic similarity
+    pub async fn search_with_metadata(&mut self, query: &str, top_k: usize) -> Result<Vec<SearchResult>> {
         log::info!("Searching with metadata for: '{}' (top {})", query, top_k);
         
-        let chunks = self.database.search_chunks(query, top_k)?;
+        // Generate embedding for the query
+        let query_embedding = self.embedding_model.encode(query)?;
+        
+        // If we have an index manager, use semantic search
+        if let Some(ref index_manager) = self.index_manager {
+            log::info!("🧠 Using TRUE SEMANTIC SEARCH with IndexManager for metadata query: '{}'", query);
+            let search_results = index_manager.search(&query_embedding, top_k)?;
+            let mut results = Vec::new();
+            
+            for result in search_results {
+                if let Some(chunk) = index_manager.get_chunk_by_id(result.id) {
+                    let score = 1.0 - result.distance; // Convert distance to similarity score
+                    results.push(SearchResult {
+                        score,
+                        text: chunk.text.clone(),
+                        metadata: Some(crate::text::ChunkMetadata {
+                            id: chunk.id,
+                            text: chunk.text.clone(),
+                            source: Some("".to_string()), // TODO: Map from IndexManager metadata
+                            page: None,
+                            offset: 0,
+                            length: chunk.length,
+                            frame: Some(chunk.frame_number as u32),
+                            embedding: None,
+                        }),
+                    });
+                }
+            }
+            
+            log::info!("Found {} TRUE SEMANTIC results with metadata for query '{}'", results.len(), query);
+            return Ok(results);
+        }
+
+        // Check if chunks have stored embeddings for true semantic search
+        let all_chunks = self.database.search_chunks("", top_k * 10)?; // Get a sample to check
+        let chunks_with_embeddings: Vec<_> = all_chunks.iter()
+            .filter(|chunk| chunk.embedding.is_some())
+            .collect();
+        
+        if chunks_with_embeddings.is_empty() {
+            log::warn!("❌ NO SEMANTIC EMBEDDINGS FOUND: The database contains no stored embeddings for semantic search");
+            log::warn!("💡 SOLUTION: Re-encode the video with embedding generation enabled, or use a system with IndexManager");
+            log::warn!("🚫 REFUSING to fall back to keyword search as it may provide misleading results");
+            return Err(crate::error::MemvidError::MachineLearning(
+                "No semantic embeddings available in database. Refusing keyword fallback to avoid misleading results. Please re-encode video with embeddings enabled.".to_string()
+            ));
+        }
+
+        log::info!("🧠 Using TRUE SEMANTIC SEARCH with stored embeddings for metadata query: '{}'", query);
+
+        // Get all chunks with embeddings for semantic comparison  
+        let chunks_with_embeddings = self.database.search_chunks("", top_k * 50)?; // Get more chunks for better coverage
+        let valid_chunks: Vec<_> = chunks_with_embeddings.into_iter()
+            .filter(|chunk| chunk.embedding.is_some())
+            .collect();
+        
+        if valid_chunks.is_empty() {
+            return Ok(vec![]);
+        }
         
         let mut results = Vec::new();
-        for chunk in chunks {
-            let score = if chunk.text.to_lowercase().contains(&query.to_lowercase()) {
-                1.0
+        
+        for chunk in valid_chunks {
+            let score = if let Some(ref chunk_embedding) = chunk.embedding {
+                self.compute_cosine_similarity(&query_embedding, chunk_embedding)
             } else {
-                0.5
+                continue; // Skip chunks without embeddings
             };
             
             results.push(SearchResult {
@@ -125,6 +239,11 @@ impl MemvidRetriever {
             });
         }
         
+        // Sort by similarity score (descending) and take top_k
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        results.truncate(top_k);
+
+        log::info!("📊 TRUE SEMANTIC METADATA RESULTS: Found {} embedding-based results for query '{}'", results.len(), query);
         Ok(results)
     }
 
@@ -257,6 +376,19 @@ impl MemvidRetriever {
     pub fn config(&self) -> &Config {
         &self.config
     }
+
+    /// Compute cosine similarity between two embeddings
+    fn compute_cosine_similarity(&self, a: &[f32], b: &[f32]) -> f32 {
+        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        
+        if norm_a == 0.0 || norm_b == 0.0 {
+            0.0
+        } else {
+            dot_product / (norm_a * norm_b)
+        }
+    }
 }
 
 /// Retrieval statistics
@@ -331,7 +463,7 @@ mod tests {
     #[tokio::test] 
     async fn test_search() {
         let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
-        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        let mut retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
         
         // Search for quantum - should find the first chunk
         let results = retriever.search("quantum computing", 3).await.unwrap();
@@ -352,7 +484,7 @@ mod tests {
     #[tokio::test]
     async fn test_search_with_metadata() {
         let (video_file, index_file, _chunks, _temp_dir) = setup_test_memory().await;
-        let retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
+        let mut retriever = MemvidRetriever::new(&video_file, &index_file).await.unwrap();
         
         let results = retriever.search_with_metadata("blockchain", 2).await.unwrap();
         assert!(results.len() <= 2);

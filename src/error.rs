@@ -52,6 +52,10 @@ pub enum MemvidError {
     #[error("Database error: {0}")]
     Database(#[from] rusqlite::Error),
 
+    /// Candle ML framework errors
+    #[error("Candle ML error: {0}")]
+    Candle(#[from] candle_core::Error),
+
     /// Image processing errors
     #[error("Image processing error: {0}")]
     Image(String),

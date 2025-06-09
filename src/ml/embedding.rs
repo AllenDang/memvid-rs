@@ -3,16 +3,21 @@
 //! This module provides actual sentence transformer embedding generation using the Candle ML framework
 //! with real BERT/SentenceTransformer models, tokenization, and batch processing.
 
-use crate::error::Result;
+#![allow(unused_imports)]
+
+use crate::error::{MemvidError, Result};
 use crate::ml::device::DeviceType;
 use crate::ml::models::ModelManager;
 use crate::ml::text::{TextProcessor, TextConfig};
+use candle_core::{Device, Tensor};
+use candle_transformers::models::bert::{BertModel, Config as BertConfig};
+use std::collections::HashMap;
+use chrono;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Configuration for embedding model
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct EmbeddingConfig {
     /// Model name or path
     pub model_name: String,
@@ -41,7 +46,7 @@ impl Default for EmbeddingConfig {
 /// Embedding vector type
 pub type Embedding = Vec<f32>;
 
-/// Real sentence transformer embedding model using Candle
+/// Embedding model for generating semantic embeddings
 pub struct EmbeddingModel {
     /// Configuration
     config: EmbeddingConfig,
@@ -53,6 +58,10 @@ pub struct EmbeddingModel {
     model_manager: ModelManager,
     /// Whether the model is loaded and ready
     is_ready: bool,
+    /// Candle device for computation
+    device: Device,
+    /// BERT model for inference
+    bert_model: Option<BertModel>,
 }
 
 impl EmbeddingModel {
@@ -78,6 +87,8 @@ impl EmbeddingModel {
             cache: HashMap::new(),
             model_manager,
             is_ready: false,
+            device: Device::Cpu,
+            bert_model: None,
         };
         
         // Try to load the model
@@ -90,38 +101,210 @@ impl EmbeddingModel {
     
     /// Load the actual BERT model from HuggingFace
     async fn load_model(&mut self) -> Result<()> {
-        log::info!("Loading BERT model: {}", self.config.model_name);
+        log::info!("Loading BERT model for TRUE semantic inference: {}", self.config.model_name);
         
-        // Download model files
+        // Set up device for neural network computation
+        match self.config.device_type {
+            DeviceType::Cuda(_) => {
+                #[cfg(feature = "cuda")]
+                {
+                    self.device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
+                    if matches!(self.device, Device::Cpu) {
+                        log::warn!("CUDA requested but not available, using CPU for BERT inference");
+                    } else {
+                        log::info!("🚀 Using CUDA device for TRUE BERT neural network inference");
+                    }
+                }
+                #[cfg(not(feature = "cuda"))]
+                {
+                    log::warn!("CUDA requested but not compiled in, using CPU for BERT inference");
+                    self.device = Device::Cpu;
+                }
+            },
+            DeviceType::Metal => {
+                #[cfg(feature = "metal")]
+                {
+                    self.device = Device::new_metal(0).unwrap_or(Device::Cpu);
+                    if matches!(self.device, Device::Cpu) {
+                        log::warn!("Metal requested but not available, using CPU for BERT inference");
+                    } else {
+                        log::info!("🚀 Using Metal device for TRUE BERT neural network inference");
+                    }
+                }
+                #[cfg(not(feature = "metal"))]
+                {
+                    log::warn!("Metal requested but not compiled in, using CPU for BERT inference");
+                    self.device = Device::Cpu;
+                }
+            },
+            DeviceType::Cpu => {
+                log::info!("🧠 Using CPU device for TRUE BERT neural network inference");
+                self.device = Device::Cpu;
+            },
+        };
+        
+        // Download model files from HuggingFace
         let model_dir = self.model_manager.download_model(&self.config.model_name).await?;
+        log::info!("📥 Downloaded BERT model files to: {}", model_dir.display());
         
-        // Load tokenizer
+        // Load tokenizer for proper text preprocessing
         if let Err(e) = self.text_processor.load_tokenizer(&model_dir) {
-            log::warn!("Failed to load tokenizer: {}", e);
+            return Err(MemvidError::MachineLearning(format!("Failed to load BERT tokenizer: {}", e)));
+        }
+        log::info!("📝 Loaded BERT tokenizer successfully");
+        
+        // Load BERT configuration
+        let config_path = model_dir.join("config.json");
+        if !config_path.exists() {
+            return Err(MemvidError::MachineLearning(format!("BERT config file not found: {}", config_path.display())));
         }
         
-        // For now, we'll skip actual BERT model loading due to complexity
-        // and focus on the enhanced tokenization-based approach
-        log::info!("Using enhanced tokenization-based embeddings (BERT loading skipped for Phase 3B)");
+        let config_content = std::fs::read_to_string(&config_path)
+            .map_err(|e| MemvidError::MachineLearning(format!("Failed to read BERT config: {}", e)))?;
+        
+        let bert_config: BertConfig = serde_json::from_str(&config_content)
+            .map_err(|e| MemvidError::MachineLearning(format!("Failed to parse BERT config: {}", e)))?;
+        
+        log::info!("📋 Loaded BERT config: {} layers, {} hidden size, {} attention heads", 
+                  bert_config.num_hidden_layers, bert_config.hidden_size, bert_config.num_attention_heads);
+        
+        // Load BERT model weights
+        let weights_path = model_dir.join("model.safetensors");
+        if !weights_path.exists() {
+            return Err(MemvidError::MachineLearning(format!("BERT weights file not found: {}", weights_path.display())));
+        }
+        
+        log::info!("🏋️ Loading BERT neural network weights...");
+        let var_builder = unsafe {
+            candle_nn::VarBuilder::from_mmaped_safetensors(&[weights_path], candle_core::DType::F32, &self.device)
+                .map_err(|e| MemvidError::MachineLearning(format!("Failed to load BERT safetensors: {}", e)))?
+        };
+        
+        // Initialize BERT neural network model
+        log::info!("🧠 Initializing BERT neural network architecture...");
+        let bert_model = BertModel::load(var_builder, &bert_config)
+            .map_err(|e| MemvidError::MachineLearning(format!("Failed to initialize BERT model: {}", e)))?;
+        
+        self.bert_model = Some(bert_model);
         self.is_ready = true;
+        
+        log::info!("🎉 TRUE BERT model loaded successfully!");
+        log::info!("🧠 Ready for neural network-based semantic inference");
+        log::info!("⚡ Using {}-layer transformer with {} hidden dimensions", 
+                  bert_config.num_hidden_layers, bert_config.hidden_size);
         
         Ok(())
     }
 
-    /// Generate embedding for a single text using real tokenization
+    /// Generate embedding using TRUE BERT neural network inference
+    fn generate_bert_embedding(&mut self, text: &str) -> Result<Embedding> {
+        // Use lightweight dummy embeddings during testing
+        #[cfg(test)]
+        {
+            return Ok(self.generate_test_embedding(text));
+        }
+        
+        #[cfg(not(test))]
+        {
+            log::debug!("🧠 Performing BERT neural network inference for: {}", 
+                       &text[..std::cmp::min(50, text.len())]);
+            
+            // Tokenize input text with proper padding and truncation
+            let tokenized = self.text_processor.tokenize(text)?;
+            log::trace!("Tokenized {} chars into {} tokens", text.len(), tokenized.input_ids.len());
+            
+            // Get BERT model reference
+            let bert_model = self.bert_model.as_ref()
+                .ok_or_else(|| MemvidError::MachineLearning("BERT model not loaded".to_string()))?;
+            
+            // Convert to tensors on the correct device
+            let input_ids = Tensor::new(&tokenized.input_ids[..], &self.device)
+                .map_err(|e| MemvidError::MachineLearning(format!("Failed to create input_ids tensor: {}", e)))?
+                .unsqueeze(0)?; // Add batch dimension
+                
+            let token_type_ids = Tensor::new(&tokenized.token_type_ids[..], &self.device)
+                .map_err(|e| MemvidError::MachineLearning(format!("Failed to create token_type_ids tensor: {}", e)))?
+                .unsqueeze(0)?; // Add batch dimension
+                
+            let attention_mask = Tensor::new(&tokenized.attention_mask[..], &self.device)
+                .map_err(|e| MemvidError::MachineLearning(format!("Failed to create attention_mask tensor: {}", e)))?
+                .unsqueeze(0)?; // Add batch dimension
+                
+            log::trace!("Created tensors with shapes: input_ids {:?}, token_type_ids {:?}, attention_mask {:?}", 
+                       input_ids.shape(), token_type_ids.shape(), attention_mask.shape());
+            
+            // Run BERT forward pass
+            log::debug!("🔥 Running BERT forward pass through transformer layers...");
+            let bert_output = bert_model.forward(&input_ids, &token_type_ids, Some(&attention_mask))
+                .map_err(|e| MemvidError::MachineLearning(format!("BERT forward pass failed: {}", e)))?;
+            
+            log::trace!("BERT output shape: {:?}", bert_output.shape());
+            
+            // Apply mean pooling to get sentence embedding
+            log::debug!("🎯 Applying mean pooling for sentence representation...");
+            let pooled = self.apply_mean_pooling(&bert_output, &attention_mask)?;
+            
+            // Remove batch dimension and convert tensor to Vec<f32>
+            let pooled_squeezed = pooled.squeeze(0)?;
+            let embedding_vec = pooled_squeezed.to_vec1::<f32>()
+                .map_err(|e| MemvidError::MachineLearning(format!("Failed to convert embedding tensor: {}", e)))?;
+            
+            log::debug!("✅ Generated {}-dimensional BERT embedding", embedding_vec.len());
+            
+            Ok(embedding_vec)
+        }
+    }
+    
+    /// Generate fast test embedding for unit tests (same dimensions as BERT)
+    #[cfg(test)]
+    fn generate_test_embedding(&self, text: &str) -> Embedding {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        // Create deterministic hash-based embedding with same dimensions as BERT (384)
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        let hash = hasher.finish();
+        
+        // Generate 384 pseudo-random values based on text hash
+        let mut embedding = Vec::with_capacity(384);
+        let mut seed = hash;
+        
+        for _ in 0..384 {
+            // Simple LCG pseudo-random number generator
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            let val = ((seed >> 16) as f32) / 32768.0 - 1.0; // Range [-1, 1]
+            embedding.push(val * 0.1); // Scale down for realistic embedding values
+        }
+        
+        // Normalize to unit vector (like BERT embeddings)
+        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for val in &mut embedding {
+                *val /= norm;
+            }
+        }
+        
+        embedding
+    }
+
+    /// Generate embedding for a single text using TRUE BERT neural network inference
     pub fn encode(&mut self, text: &str) -> Result<Embedding> {
         // Check cache first
         if let Some(cached) = self.cache.get(text) {
+            log::trace!("Using cached BERT embedding");
             return Ok(cached.clone());
         }
 
-        let embedding = if self.is_ready {
-            // Use enhanced tokenization-based embedding
-            self.generate_enhanced_embedding(text)?
+        let embedding = if self.is_ready && self.bert_model.is_some() {
+            // Use TRUE BERT neural network inference
+            log::debug!("🧠 Generating TRUE BERT embedding for: {}", text);
+            self.generate_bert_embedding(text)?
         } else {
-            // Fallback to placeholder implementation
-            log::debug!("Using fallback embedding for: {}", text);
-            self.generate_placeholder_embedding(text)?
+            // Fail explicitly - no fallback for true semantic search
+            return Err(MemvidError::MachineLearning(
+                "BERT model not loaded - true semantic search requires neural network inference".to_string()
+            ));
         };
         
         // Cache the result
@@ -226,9 +409,11 @@ impl EmbeddingModel {
             }
             
             if attempts > max_retries {
-                log::error!("Failed to generate embedding after {} attempts: {:?}", max_retries, last_error);
+                if let Some(e) = last_error {
+                    log::error!("Failed to generate embedding after {} retries: {}", max_retries, e);
+                }
                 failed_texts.push(text.clone());
-                // Add placeholder embedding to maintain order
+                // Add placeholder to maintain order
                 all_embeddings.push(vec![0.0; self.dimension()]);
             }
         }
@@ -324,116 +509,10 @@ impl EmbeddingModel {
         }
     }
 
-    /// Normalize embedding to unit length (standalone version)
+    /// Normalize embedding vector to unit length (standalone version for testing)
     fn normalize_embedding_standalone(&self, mut embedding: Vec<f32>) -> Vec<f32> {
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 1e-12 {
-            for val in &mut embedding {
-                *val /= norm;
-            }
-        }
-        embedding
-    }
-
-    /// Generate enhanced embedding using real tokenization
-    fn generate_enhanced_embedding(&mut self, text: &str) -> Result<Embedding> {
-        // Use real tokenizer for better text understanding
-        let tokenized = self.text_processor.tokenize(text)?;
-        
-        // Generate improved embedding based on real tokenization
-        let mut embedding = vec![0.0f32; 384]; // MiniLM-L6-v2 dimension
-        
-        // Use token IDs and attention mask for better semantic representation
-        let valid_tokens: Vec<u32> = tokenized.input_ids.iter()
-            .zip(tokenized.attention_mask.iter())
-            .filter(|(_, mask)| **mask == 1)
-            .map(|(token_id, _)| *token_id)
-            .collect();
-        
-        if !valid_tokens.is_empty() {
-            // Distribute token information across embedding dimensions
-            for (i, &token_id) in valid_tokens.iter().enumerate() {
-                let token_float = token_id as f32;
-                
-                // Use multiple hash functions for better distribution
-                for hash_func in 0..5 {
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    use std::hash::{Hash, Hasher};
-                    
-                    (token_id.wrapping_add(hash_func * 1000)).hash(&mut hasher);
-                    let hash = hasher.finish();
-                    
-                    // Map to embedding dimensions with position encoding
-                    for j in 0..20 {
-                        let dim_idx = ((hash as usize).wrapping_add(j * 19).wrapping_add(i * 17)) % embedding.len();
-                        let value = ((hash >> (j * 3)) & 0x7) as f32 / 8.0 - 0.5;
-                        embedding[dim_idx] += value * (1.0 / (i as f32 + 1.0).sqrt());
-                    }
-                }
-                
-                // Add positional encoding based on token position
-                let pos_weight = 1.0 - (i as f32 / valid_tokens.len() as f32) * 0.1;
-                for k in 0..10 {
-                    let dim = (token_id as usize * 7 + k * 13) % embedding.len();
-                    embedding[dim] += (token_float / 30000.0) * pos_weight;
-                }
-            }
-            
-            // Apply sequence length normalization
-            let seq_norm = 1.0 / (valid_tokens.len() as f32).sqrt();
-            for val in &mut embedding {
-                *val *= seq_norm;
-            }
-        }
-        
-        // Apply final normalization if configured
-        if self.config.normalize {
-            Ok(self.normalize_embedding(embedding))
-        } else {
-            Ok(embedding)
-        }
-    }
-
-    /// Generate placeholder embedding based on text content
-    fn generate_placeholder_embedding(&self, text: &str) -> Result<Embedding> {
-        // Create a deterministic but varied embedding based on text content
-        // This is a placeholder - real implementation will use Candle ML
-        
-        let mut embedding = vec![0.0f32; 384]; // MiniLM-L6-v2 dimension
-        
-        // Simple hash-based approach for consistent but different embeddings
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        
-        for (i, word) in text.split_whitespace().enumerate() {
-            let mut hasher = DefaultHasher::new();
-            word.hash(&mut hasher);
-            let hash = hasher.finish();
-            
-            // Distribute hash bits across embedding dimensions
-            for j in 0..10.min(embedding.len()) {
-                let idx = (i * 10 + j) % embedding.len();
-                embedding[idx] += ((hash >> (j * 6)) & 0x3F) as f32 / 64.0 - 0.5;
-            }
-        }
-        
-        // Normalize if configured
-        if self.config.normalize {
-            let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if norm > 0.0 {
-                for val in &mut embedding {
-                    *val /= norm;
-                }
-            }
-        }
-        
-        Ok(embedding)
-    }
-
-    /// Normalize embedding to unit length
-    fn normalize_embedding(&self, mut embedding: Vec<f32>) -> Vec<f32> {
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 1e-12 {
+        if norm > 0.0 {
             for val in &mut embedding {
                 *val /= norm;
             }
@@ -510,6 +589,35 @@ impl EmbeddingModel {
             avg_text_length,
             estimated_memory_mb: (total_text_length + self.cache.len() * self.dimension() * 4) as f32 / 1_048_576.0,
         }
+    }
+
+    /// Apply mean pooling with attention mask
+    #[cfg(not(test))]
+    fn apply_mean_pooling(&self, hidden_states: &Tensor, attention_mask: &Tensor) -> Result<Tensor> {
+        log::trace!("Applying attention-weighted mean pooling");
+        
+        // Expand attention mask to match hidden states dimensions
+        let expanded_mask = attention_mask.unsqueeze(2)?
+            .expand(hidden_states.shape())?
+            .to_dtype(hidden_states.dtype())?;
+        
+        // Apply mask to hidden states
+        let masked_hidden = hidden_states.mul(&expanded_mask)?;
+        
+        // Sum along sequence dimension
+        let summed = masked_hidden.sum(1)?;
+        
+        // Count non-masked tokens for averaging
+        let mask_sum = expanded_mask.sum(1)?;
+        
+        // Avoid division by zero
+        let mask_sum = mask_sum.clamp(1e-9, f32::INFINITY)?;
+        
+        // Compute mean
+        let pooled = summed.div(&mask_sum)?;
+        
+        log::trace!("Mean pooling complete, output shape: {:?}", pooled.shape());
+        Ok(pooled)
     }
 }
 

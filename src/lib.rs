@@ -17,11 +17,11 @@
 //!     encoder.add_text("Your text content here", 1024, 32).await?;
 //!     
 //!     // Build the video memory
-//!     let stats = encoder.build_video("memory.mp4", "index.json").await?;
+//!     let stats = encoder.build_video("memory.mp4", "index.db").await?;
 //!     println!("Encoded {} chunks into video", stats.total_chunks);
 //!     
 //!     // Query your video memory
-//!     let retriever = MemvidRetriever::new("memory.mp4", "index.json").await?;
+//!     let mut retriever = MemvidRetriever::new("memory.mp4", "index.db").await?;
 //!     let results = retriever.search("your query", 5).await?;
 //!     
 //!     for (score, text) in results {
@@ -44,7 +44,7 @@ pub mod api;
 pub mod utils;
 
 // Re-export main API types
-pub use api::{MemvidEncoder, MemvidRetriever, SearchResult};
+pub use api::{MemvidEncoder, MemvidRetriever, SearchResult, quick_chat, chat_with_memory, quick_chat_with_config, chat_with_memory_config};
 pub use config::Config;
 pub use error::{MemvidError, Result};
 

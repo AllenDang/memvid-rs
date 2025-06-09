@@ -27,8 +27,8 @@ enum Commands {
         #[arg(short, long, default_value = "memory.mp4")]
         output: PathBuf,
         
-        /// Output index file
-        #[arg(short, long, default_value = "memory_index.json")]
+        /// Output index file (SQLite database)
+        #[arg(short, long, default_value = "memory_index.db")]
         index: PathBuf,
         
         /// Chunk size in characters
@@ -46,7 +46,7 @@ enum Commands {
         #[arg(short, long)]
         video: PathBuf,
         
-        /// Index file
+        /// Index file (SQLite database)
         #[arg(short, long)]
         index: PathBuf,
         
@@ -64,7 +64,7 @@ enum Commands {
         #[arg(short, long)]
         video: PathBuf,
         
-        /// Index file
+        /// Index file (SQLite database)
         #[arg(short, long)]
         index: PathBuf,
     },
@@ -159,7 +159,7 @@ async fn search_command(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("🔍 Searching for: \"{}\"", query);
     
-    let retriever = MemvidRetriever::new(&video, &index).await?;
+    let mut retriever = MemvidRetriever::new(&video, &index).await?;
     let results = retriever.search(&query, top_k).await?;
     
     if results.is_empty() {
@@ -187,7 +187,7 @@ async fn chat_command(
     println!("   Type 'quit' or 'exit' to end the session");
     println!();
     
-    let retriever = MemvidRetriever::new(&video, &index).await?;
+    let mut retriever = MemvidRetriever::new(&video, &index).await?;
     
     loop {
         print!("❓ Query: ");

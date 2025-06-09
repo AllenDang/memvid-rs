@@ -93,7 +93,9 @@ impl ModelManager {
             },
         };
 
-        self.models.insert("all-MiniLM-L6-v2".to_string(), mini_lm);
+        // Register with both short and full names for compatibility
+        self.models.insert("all-MiniLM-L6-v2".to_string(), mini_lm.clone());
+        self.models.insert("sentence-transformers/all-MiniLM-L6-v2".to_string(), mini_lm);
 
         // Register other common models
         let bert_base = ModelInfo {

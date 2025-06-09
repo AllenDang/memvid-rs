@@ -8,6 +8,7 @@ use crate::storage::EncodingStats;
 use crate::text::{TextChunker, ChunkingStrategy, ChunkMetadata, PdfProcessor};
 use crate::qr::QrEncoder;
 use crate::video::encoder::VideoEncoder;
+use crate::ml::{EmbeddingModel, EmbeddingConfig};
 use std::path::Path;
 use regex;
 
@@ -18,6 +19,7 @@ pub struct MemvidEncoder {
     qr_encoder: QrEncoder,
     text_chunker: TextChunker,
     video_encoder: VideoEncoder,
+    embedding_model: EmbeddingModel,
 }
 
 impl MemvidEncoder {
@@ -28,9 +30,21 @@ impl MemvidEncoder {
         let qr_encoder = QrEncoder::new(config.qr.clone());
         let text_chunker = TextChunker::new(
             config.chunking.clone(),
-            ChunkingStrategy::Character,
+            ChunkingStrategy::Sentence,
         )?;
         let video_encoder = VideoEncoder::new(config.video.clone());
+        
+        // Try to initialize embedding model for semantic search support
+        let embedding_model = match EmbeddingModel::new(EmbeddingConfig::default()).await {
+            Ok(model) => {
+                log::info!("🧠 Embedding model initialized - semantic embeddings will be generated during encoding");
+                model
+            }
+            Err(e) => {
+                log::error!("❌ Failed to initialize embedding model: {}. Encoding will not proceed.", e);
+                return Err(MemvidError::Generic(e.to_string()));
+            }
+        };
         
         Ok(Self {
             config,
@@ -38,6 +52,7 @@ impl MemvidEncoder {
             qr_encoder,
             text_chunker,
             video_encoder,
+            embedding_model,
         })
     }
 
@@ -47,7 +62,7 @@ impl MemvidEncoder {
         custom_config.chunk_size = chunk_size;
         custom_config.overlap = overlap;
         
-        let custom_chunker = TextChunker::new(custom_config, ChunkingStrategy::Character)?;
+        let custom_chunker = TextChunker::new(custom_config, ChunkingStrategy::Sentence)?;
         let mut new_chunks = custom_chunker.chunk_text(text, None)?;
         
         // Update chunk IDs to be sequential
@@ -129,7 +144,7 @@ impl MemvidEncoder {
         self.add_text(&text, chunk_size, overlap).await
     }
 
-    /// Build the video from all added chunks
+    /// Build video from chunks, generating embeddings if enabled
     pub async fn build_video(&mut self, output_file: &str, index_file: &str) -> Result<EncodingStats> {
         if self.chunks.is_empty() {
             return Err(MemvidError::Generic("No chunks added for encoding".to_string()));
@@ -138,6 +153,19 @@ impl MemvidEncoder {
         let start_time = std::time::Instant::now();
 
         log::info!("Starting video encoding for {} chunks", self.chunks.len());
+
+        // Generate embeddings if embedding model is available
+        log::info!("🧠 Generating semantic embeddings for {} chunks...", self.chunks.len());
+        
+        let chunk_texts: Vec<String> = self.chunks.iter().map(|c| c.text.clone()).collect();
+        let embeddings = self.embedding_model.encode_batch(&chunk_texts)?;
+        
+        // Assign embeddings to chunks
+        for (chunk, embedding) in self.chunks.iter_mut().zip(embeddings.iter()) {
+            chunk.embedding = Some(embedding.clone());
+        }
+        
+        log::info!("✅ Generated embeddings for {} chunks", self.chunks.len());
 
         // Generate QR code frames
         log::info!("Generating QR code frames...");
@@ -165,7 +193,7 @@ impl MemvidEncoder {
             .map(|m| m.len())
             .unwrap_or(0);
 
-        // Save index to SQLite database
+        // Save index to SQLite database (now with embeddings!)
         self.save_index(index_file).await?;
 
         let processing_time = start_time.elapsed().as_secs_f64();
@@ -205,6 +233,20 @@ impl MemvidEncoder {
 
         progress_callback(0.0);
 
+        // Generate embeddings if embedding model is available
+        log::info!("🧠 Generating semantic embeddings for {} chunks...", self.chunks.len());
+        
+        let chunk_texts: Vec<String> = self.chunks.iter().map(|c| c.text.clone()).collect();
+        let embeddings = self.embedding_model.encode_batch(&chunk_texts)?;
+        
+        // Assign embeddings to chunks
+        for (chunk, embedding) in self.chunks.iter_mut().zip(embeddings.iter()) {
+            chunk.embedding = Some(embedding.clone());
+        }
+        
+        log::info!("✅ Generated embeddings for {} chunks", self.chunks.len());
+        progress_callback(25.0); // Embeddings are ~25% of work
+
         // Generate QR code frames with progress
         log::info!("Generating QR code frames...");
         let mut qr_images = Vec::new();
@@ -215,12 +257,12 @@ impl MemvidEncoder {
             
             chunk.frame = Some(frame_num as u32);
             
-            // Update progress (QR generation is ~50% of total work)
-            let qr_progress = (frame_num + 1) as f32 / total_chunks as f32 * 50.0;
+            // Update progress (QR generation is ~40% of total work, from 25% to 65%)
+            let qr_progress = 25.0 + (frame_num + 1) as f32 / total_chunks as f32 * 40.0;
             progress_callback(qr_progress);
         }
 
-        progress_callback(50.0);
+        progress_callback(65.0);
 
         // Encode video
         log::info!("Encoding video...");
@@ -228,7 +270,7 @@ impl MemvidEncoder {
         
         progress_callback(90.0);
 
-        // Save index to SQLite database
+        // Save index to SQLite database (now with embeddings!)
         self.save_index(index_file).await?;
         
         progress_callback(100.0);
@@ -237,6 +279,14 @@ impl MemvidEncoder {
         let video_file_size = std::fs::metadata(output_file)
             .map(|m| m.len())
             .unwrap_or(0);
+
+        log::info!(
+            "Video encoding completed: {} chunks → {} frames → {} MB in {:.2}s",
+            self.chunks.len(),
+            qr_images.len(),
+            video_file_size as f64 / 1_048_576.0,
+            processing_time
+        );
 
         Ok(EncodingStats {
             total_chunks: self.chunks.len(),
@@ -347,6 +397,11 @@ impl MemvidEncoder {
         log::info!("Added {} chunks directly. Total: {}", chunks.len(), self.chunks.len());
         Ok(())
     }
+
+    /// Check if embeddings are enabled (always true)
+    pub fn has_embeddings(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
@@ -364,14 +419,17 @@ mod tests {
     #[tokio::test]
     async fn test_add_text() {
         let mut encoder = MemvidEncoder::new(None).await.unwrap();
-        encoder.add_text("Hello, World!", 1024, 32).await.unwrap();
+        // Use longer text to meet min_chunk_size requirement (default: 100 chars)
+        let test_text = "This is a longer test text that should definitely meet the minimum chunk size requirement for proper chunking. The text needs to be at least 100 characters long to create a valid chunk.";
+        encoder.add_text(test_text, 1024, 32).await.unwrap();
         assert_eq!(encoder.chunk_count(), 1);
     }
 
     #[tokio::test]
     async fn test_add_text_file() {
         let mut temp_file = NamedTempFile::new().unwrap();
-        writeln!(temp_file, "This is test content").unwrap();
+        // Write longer content to meet min_chunk_size
+        writeln!(temp_file, "This is test content that is long enough to meet the minimum chunk size requirement. We need at least 100 characters to create a valid chunk for processing.").unwrap();
 
         let mut encoder = MemvidEncoder::new(None).await.unwrap();
         encoder.add_text_file(temp_file.path()).await.unwrap();
@@ -381,7 +439,9 @@ mod tests {
     #[tokio::test]
     async fn test_clear() {
         let mut encoder = MemvidEncoder::new(None).await.unwrap();
-        encoder.add_text("Test content", 1024, 32).await.unwrap();
+        // Use longer text to meet min_chunk_size requirement
+        let test_text = "This is test content that is long enough to meet the minimum chunk size requirement for proper chunking and processing. The text needs to be sufficient.";
+        encoder.add_text(test_text, 1024, 32).await.unwrap();
         assert!(encoder.chunk_count() > 0);
         
         encoder.clear();
@@ -408,9 +468,10 @@ mod tests {
     #[tokio::test]
     async fn test_add_text_chunking() {
         let mut encoder = MemvidEncoder::new(None).await.unwrap();
-        let text = "This is a test. ".repeat(50); // 800 characters
+        // Create text that will definitely create multiple chunks
+        let test_text = "This is a long test document that should be split into multiple chunks. ".repeat(20); // About 1460 characters
         
-        encoder.add_text(&text, 100, 20).await.unwrap();
+        encoder.add_text(&test_text, 500, 50).await.unwrap(); // Smaller chunk size to force multiple chunks
         
         assert!(encoder.chunk_count() > 1);
         // Verify no empty chunks
