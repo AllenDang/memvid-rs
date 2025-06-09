@@ -70,6 +70,36 @@ enum Commands {
         #[arg(short, long)]
         index: PathBuf,
     },
+
+    /// Add new content to existing knowledge base (incremental update)
+    Append {
+        /// Existing video file to append to
+        #[arg(short, long)]
+        video: PathBuf,
+
+        /// Existing index file (SQLite database)
+        #[arg(short, long)]
+        index: PathBuf,
+
+        /// New input file(s) to add
+        #[arg(required = true)]
+        inputs: Vec<PathBuf>,
+    },
+
+    /// Store LLM conversation history to knowledge base
+    AppendConversation {
+        /// Existing video file to append to
+        #[arg(short, long)]
+        video: PathBuf,
+
+        /// Existing index file (SQLite database)
+        #[arg(short, long)]
+        index: PathBuf,
+
+        /// Conversation history file (JSON format: [{"human": "...", "assistant": "..."}])
+        #[arg(short, long)]
+        conversation_file: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -99,6 +129,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Chat { video, index } => {
             chat_command(video, index).await?;
+        }
+        Commands::Append { video, index, inputs } => {
+            append_command(video, index, inputs).await?;
+        }
+        Commands::AppendConversation { video, index, conversation_file } => {
+            append_conversation_command(video, index, conversation_file).await?;
         }
     }
 
@@ -227,6 +263,163 @@ async fn chat_command(video: PathBuf, index: PathBuf) -> Result<(), Box<dyn std:
             }
         }
         println!();
+    }
+
+    Ok(())
+}
+
+async fn append_command(
+    video: PathBuf,
+    index: PathBuf,
+    inputs: Vec<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("🎬 Starting incremental update...");
+
+    // Verify existing files exist
+    if !video.exists() {
+        eprintln!("❌ Existing video file not found: {}", video.display());
+        return Ok(());
+    }
+    if !index.exists() {
+        eprintln!("❌ Existing index file not found: {}", index.display());
+        return Ok(());
+    }
+
+    let mut encoder = MemvidEncoder::new(None).await?;
+    let mut total_added_chunks = 0;
+    let mut total_processing_time = 0.0;
+
+    for input in inputs {
+        println!("📄 Processing: {}", input.display());
+
+        if !input.exists() {
+            eprintln!("❌ File not found: {}", input.display());
+            continue;
+        }
+
+        let start_time = std::time::Instant::now();
+
+        // Use append_document_chunks for each file - this handles the incremental update correctly
+        let stats = match encoder
+            .append_document_chunks(
+                video.to_str().unwrap(),
+                index.to_str().unwrap(),
+                input.to_str().unwrap(),
+            )
+            .await
+        {
+            Ok(stats) => stats,
+            Err(e) => {
+                eprintln!("❌ Failed to process {}: {}", input.display(), e);
+                continue;
+            }
+        };
+
+        total_added_chunks += stats.total_chunks;
+        total_processing_time += stats.processing_time;
+        
+        println!(
+            "   ✅ Added {} chunks from {} in {:.2}s", 
+            stats.total_chunks, 
+            input.display(),
+            start_time.elapsed().as_secs_f64()
+        );
+    }
+
+    if total_added_chunks == 0 {
+        eprintln!("❌ No content was successfully processed");
+        return Ok(());
+    }
+
+    println!("✅ Incremental update complete!");
+    println!("   📊 Total added chunks: {}", total_added_chunks);
+    println!("   🎞️  Total added frames: {}", total_added_chunks);
+    println!("   ⏱️  Total time: {:.2}s", total_processing_time);
+    println!("   📹 Updated video: {}", video.display());
+    println!("   📋 Updated index: {}", index.display());
+
+    Ok(())
+}
+
+async fn append_conversation_command(
+    video: PathBuf,
+    index: PathBuf,
+    conversation_file: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("🎬 Starting conversation history append...");
+
+    // Verify existing files exist
+    if !video.exists() {
+        eprintln!("❌ Existing video file not found: {}", video.display());
+        return Ok(());
+    }
+    if !index.exists() {
+        eprintln!("❌ Existing index file not found: {}", index.display());
+        return Ok(());
+    }
+
+    if !conversation_file.exists() {
+        eprintln!("❌ Conversation history file not found: {}", conversation_file.display());
+        return Ok(());
+    }
+
+    let mut encoder = MemvidEncoder::new(None).await?;
+
+    println!("📄 Processing conversation history file...");
+    
+    // Try to parse as JSON conversation format first
+    let file_content = std::fs::read_to_string(&conversation_file)?;
+    
+    // TODO: For now, parse JSON conversations
+    // Expected format: [{"human": "...", "assistant": "..."}, ...]
+    if let Ok(json_conversations) = serde_json::from_str::<Vec<serde_json::Value>>(&file_content) {
+        let mut conversations = Vec::new();
+        
+        for conv in json_conversations {
+            if let (Some(human), Some(assistant)) = (
+                conv.get("human").and_then(|v| v.as_str()),
+                conv.get("assistant").and_then(|v| v.as_str()),
+            ) {
+                conversations.push((human.to_string(), assistant.to_string()));
+            }
+        }
+        
+        if !conversations.is_empty() {
+            let stats = encoder
+                .append_conversation_history(
+                    video.to_str().unwrap(),
+                    index.to_str().unwrap(),
+                    conversations,
+                )
+                .await?;
+            
+            println!("✅ Conversation history append complete!");
+            println!("   💬 Conversation turns: {}", stats.total_chunks / 2);
+            println!("   📊 Total chunks: {}", stats.total_chunks);
+            println!("   🎞️  Total frames: {}", stats.total_frames);
+            println!("   ⏱️  Time: {:.2}s", stats.processing_time);
+            println!("   📹 Updated video: {}", video.display());
+            println!("   📋 Updated index: {}", index.display());
+        } else {
+            eprintln!("❌ No valid conversations found in JSON file");
+        }
+    } else {
+        // Fallback: treat as plain text file  
+        println!("📄 JSON parsing failed, treating as plain text file...");
+        let stats = encoder
+            .append_document_chunks(
+                video.to_str().unwrap(),
+                index.to_str().unwrap(),
+                conversation_file.to_str().unwrap(),
+            )
+            .await?;
+            
+        println!("✅ Conversation history append complete!");
+        println!("   📊 Chunks: {}", stats.total_chunks);
+        println!("   🎞️  Frames: {}", stats.total_frames);
+        println!("   ⏱️  Time: {:.2}s", stats.processing_time);
+        println!("   📹 Updated video: {}", video.display());
+        println!("   📋 Updated index: {}", index.display());
     }
 
     Ok(())

@@ -12,6 +12,7 @@ categories = ["multimedia::video", "text-processing", "database"]
 [dependencies]
 # Async runtime
 tokio = { version = "1.45", features = ["full"] }
+futures = "0.3"
 
 # Parallel processing
 rayon = "1.10"
@@ -87,6 +88,9 @@ indicatif = "0.17"
 # Numerical computing
 ndarray = "0.16"
 half = "2.4"         # Half-precision float support
+
+# Performance and caching
+lru = "0.12"         # LRU cache for frame caching
 
 [dev-dependencies]
 criterion = "0.5"    # Performance testing
