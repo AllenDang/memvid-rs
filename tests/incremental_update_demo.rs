@@ -63,12 +63,13 @@ async fn demo_personal_knowledge_base_workflow() -> Result<(), Box<dyn std::erro
     );
 
     let append_start = Instant::now();
-    // For demo purposes, simulate append by creating new encoder
-    // In real implementation, this would use the append_chunks method
-    let mut new_encoder = MemvidEncoder::new(None).await?;
-    new_encoder.add_chunks(new_documents)?;
-    let append_stats = new_encoder
-        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+    // Use the correct append_chunks method for incremental update
+    let append_stats = encoder
+        .append_chunks(
+            video_file.to_str().unwrap(),
+            index_file.to_str().unwrap(),
+            new_documents,
+        )
         .await?;
 
     println!("✅ Documents added:");
@@ -99,16 +100,13 @@ async fn demo_personal_knowledge_base_workflow() -> Result<(), Box<dyn std::erro
     println!("Storing {} conversation turns...", conversations.len());
 
     let conversation_start = Instant::now();
-    // For demo purposes, simulate conversation append
-    let conversation_chunks: Vec<String> = conversations
-        .into_iter()
-        .flat_map(|(human, ai)| vec![format!("Human: {}", human), format!("Assistant: {}", ai)])
-        .collect();
-
-    let mut conv_encoder = MemvidEncoder::new(None).await?;
-    conv_encoder.add_chunks(conversation_chunks)?;
-    let conversation_stats = conv_encoder
-        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+    // Use the correct append_conversation_history method
+    let conversation_stats = encoder
+        .append_conversation_history(
+            video_file.to_str().unwrap(),
+            index_file.to_str().unwrap(),
+            conversations,
+        )
         .await?;
 
     println!("✅ Conversation history stored:");
@@ -197,15 +195,13 @@ async fn demo_conversation_only_workflow() -> Result<(), Box<dyn std::error::Err
          "Quantum entanglement has applications in quantum computing, quantum cryptography, and quantum teleportation for secure communications.".to_string()),
     ];
 
-    // Simulate daily conversation append
-    let daily_chunks: Vec<String> = daily_conversations
-        .into_iter()
-        .flat_map(|(human, ai)| vec![format!("Human: {}", human), format!("Assistant: {}", ai)])
-        .collect();
-
-    encoder.add_chunks(daily_chunks)?;
+    // Use the correct append_conversation_history method
     let conversation_stats = encoder
-        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+        .append_conversation_history(
+            video_file.to_str().unwrap(),
+            index_file.to_str().unwrap(),
+            daily_conversations,
+        )
         .await?;
 
     println!("Stored conversation history:");
