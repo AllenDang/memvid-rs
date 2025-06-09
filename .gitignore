@@ -3,3 +3,4 @@
 output
 ref/memvid-main
 .DS_Store
+justfile
