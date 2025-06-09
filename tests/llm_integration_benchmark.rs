@@ -120,7 +120,7 @@ async fn benchmark_llm_conversation_pattern() -> Result<(), Box<dyn std::error::
     println!("  Target: <10s for practical personal knowledge base");
     println!("  Actual: {}ms average per search", avg_search_ms);
     println!("  Context: Search includes BERT embedding generation + similarity computation");
-    
+
     // Realistic expectation: <10 seconds is acceptable for personal knowledge base
     // This includes BERT model inference for query embedding generation
     // In LLM scenarios, search is typically 10-20% of total response time
