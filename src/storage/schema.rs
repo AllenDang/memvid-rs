@@ -30,4 +30,4 @@ pub const CREATE_CHUNKS_INDEXES: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_chunks_frame ON chunks(frame);
 CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);
 CREATE INDEX IF NOT EXISTS idx_chunks_page ON chunks(page);
-"#; 
+"#;

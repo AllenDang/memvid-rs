@@ -37,10 +37,9 @@ async fn test_basic_encoding() -> Result<(), Box<dyn std::error::Error>> {
     let video_path = temp_dir.path().join("sample_memory.mp4");
     let index_path = temp_dir.path().join("sample_memory.db");
 
-    let encoding_stats = encoder.build_video(
-        video_path.to_str().unwrap(),
-        index_path.to_str().unwrap(),
-    ).await?;
+    let encoding_stats = encoder
+        .build_video(video_path.to_str().unwrap(), index_path.to_str().unwrap())
+        .await?;
 
     // Verify encoding results
     assert!(encoding_stats.total_chunks > 0);
@@ -55,10 +54,10 @@ async fn test_basic_encoding() -> Result<(), Box<dyn std::error::Error>> {
     // Verify file sizes are reasonable
     let video_size = std::fs::metadata(&video_path)?.len();
     let index_size = std::fs::metadata(&index_path)?.len();
-    
+
     assert!(video_size > 0);
     assert!(index_size > 0);
-    
+
     // Video should be reasonably sized for our test data
     assert!(video_size > 1000); // At least 1KB
     assert!(video_size < 10_000_000); // Less than 10MB for this small test
@@ -69,55 +68,56 @@ async fn test_basic_encoding() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_encoding_with_chunks() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
-    
+
     // Initialize encoder
     let mut encoder = MemvidEncoder::new(None).await?;
-    
+
     // Add chunks directly
     let chunks = vec![
         "Test chunk one with some content".to_string(),
         "Test chunk two with different content".to_string(),
         "Test chunk three with more content".to_string(),
     ];
-    
+
     encoder.add_chunks(chunks.clone())?;
-    
+
     let stats = encoder.get_stats();
     assert_eq!(stats.total_chunks, chunks.len());
-    
+
     // Build video
     let video_path = temp_dir.path().join("chunks_test.mp4");
     let index_path = temp_dir.path().join("chunks_test.db");
-    
-    let encoding_stats = encoder.build_video(
-        video_path.to_str().unwrap(),
-        index_path.to_str().unwrap(),
-    ).await?;
-    
+
+    let encoding_stats = encoder
+        .build_video(video_path.to_str().unwrap(), index_path.to_str().unwrap())
+        .await?;
+
     assert_eq!(encoding_stats.total_chunks, chunks.len());
     assert!(encoding_stats.total_frames > 0);
     assert!(video_path.exists());
     assert!(index_path.exists());
-    
+
     Ok(())
 }
 
 #[tokio::test]
 async fn test_encoder_clear() -> Result<(), Box<dyn std::error::Error>> {
     let mut encoder = MemvidEncoder::new(None).await?;
-    
+
     // Add some content
-    encoder.add_text("Test content for clearing", 100, 10).await?;
-    
+    encoder
+        .add_text("Test content for clearing", 100, 10)
+        .await?;
+
     let stats_before = encoder.get_stats();
     assert!(stats_before.total_chunks > 0);
-    
+
     // Clear encoder
     encoder.clear();
-    
+
     let stats_after = encoder.get_stats();
     assert_eq!(stats_after.total_chunks, 0);
     assert_eq!(stats_after.total_frames, 0);
-    
+
     Ok(())
-} 
+}

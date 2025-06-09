@@ -8,4 +8,4 @@ pub mod pdf;
 
 // Re-export main types and functions
 pub use chunking::{ChunkMetadata, ChunkingStrategy, TextChunker};
-pub use pdf::PdfProcessor; 
+pub use pdf::PdfProcessor;

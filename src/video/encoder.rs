@@ -28,23 +28,30 @@ impl VideoEncoder {
     /// Encode multiple frames into a video file
     pub async fn encode_frames(&self, frames: &[DynamicImage], output_path: &str) -> Result<()> {
         if frames.is_empty() {
-            return Err(MemvidError::Video("No frames provided for encoding".to_string()));
+            return Err(MemvidError::Video(
+                "No frames provided for encoding".to_string(),
+            ));
         }
 
         let output_path = Path::new(output_path);
-        
+
         // Create output directory if it doesn't exist
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(MemvidError::Io)?;
+            std::fs::create_dir_all(parent).map_err(MemvidError::Io)?;
         }
 
-        log::info!("Encoding {} frames to {} ({}x{} @ {} fps)", 
-                   frames.len(), output_path.display(), 
-                   self.config.frame_width, self.config.frame_height, self.config.fps);
+        log::info!(
+            "Encoding {} frames to {} ({}x{} @ {} fps)",
+            frames.len(),
+            output_path.display(),
+            self.config.frame_width,
+            self.config.frame_height,
+            self.config.fps
+        );
 
         // Initialize FFmpeg
-        ffmpeg_next::init().map_err(|e| MemvidError::Video(format!("FFmpeg init failed: {}", e)))?;
+        ffmpeg_next::init()
+            .map_err(|e| MemvidError::Video(format!("FFmpeg init failed: {}", e)))?;
 
         // Create output format context
         let mut output_ctx = ffmpeg_next::format::output(&output_path)
@@ -55,12 +62,15 @@ impl VideoEncoder {
             .ok_or_else(|| MemvidError::Video("H.265 (HEVC) encoder not found".to_string()))?;
 
         // Create video stream
-        let mut stream = output_ctx.add_stream(codec)
+        let mut stream = output_ctx
+            .add_stream(codec)
             .map_err(|e| MemvidError::Video(format!("Failed to add video stream: {}", e)))?;
         let stream_index = stream.index();
 
-        // Create encoder context  
-        let mut encoder = ffmpeg_next::codec::context::Context::new_with_codec(codec).encoder().video()
+        // Create encoder context
+        let mut encoder = ffmpeg_next::codec::context::Context::new_with_codec(codec)
+            .encoder()
+            .video()
             .map_err(|e| MemvidError::Video(format!("Failed to create video encoder: {}", e)))?;
 
         // Set encoder parameters - use config dimensions, not QR size
@@ -72,31 +82,39 @@ impl VideoEncoder {
 
         // Set codec parameters optimized for QR codes (matching Python H.265 implementation exactly)
         let mut dictionary = ffmpeg_next::Dictionary::new();
-        
+
         // Use parameters from config.quality_params (matches Python H265_PARAMETERS)
         for (key, value) in &self.config.quality_params {
             dictionary.set(key, value);
         }
 
         // Open encoder
-        let mut encoder = encoder.open_with(dictionary)
+        let mut encoder = encoder
+            .open_with(dictionary)
             .map_err(|e| MemvidError::Video(format!("Failed to open encoder: {}", e)))?;
 
         // Update stream parameters
         stream.set_parameters(&encoder);
 
         // Write header
-        output_ctx.write_header()
+        output_ctx
+            .write_header()
             .map_err(|e| MemvidError::Video(format!("Failed to write header: {}", e)))?;
 
         // Encode frames with upscaling
-        self.encode_image_frames(frames, &mut encoder, &mut output_ctx, stream_index).await?;
+        self.encode_image_frames(frames, &mut encoder, &mut output_ctx, stream_index)
+            .await?;
 
         // Write trailer
-        output_ctx.write_trailer()
+        output_ctx
+            .write_trailer()
             .map_err(|e| MemvidError::Video(format!("Failed to write trailer: {}", e)))?;
 
-        log::info!("Successfully encoded {} frames to {}", frames.len(), output_path.display());
+        log::info!(
+            "Successfully encoded {} frames to {}",
+            frames.len(),
+            output_path.display()
+        );
         Ok(())
     }
 
@@ -112,17 +130,20 @@ impl VideoEncoder {
         let target_width = self.config.frame_width;
         let target_height = self.config.frame_height;
 
-        log::info!("Upscaling frames from QR size to {}x{} for compression resistance", 
-                   target_width, target_height);
+        log::info!(
+            "Upscaling frames from QR size to {}x{} for compression resistance",
+            target_width,
+            target_height
+        );
 
         for (i, image) in frames.iter().enumerate() {
             // Always upscale QR codes to target resolution for better compression resistance
             let upscaled_image = image.resize_exact(
-                target_width, 
-                target_height, 
-                image::imageops::FilterType::Nearest  // Use nearest neighbor for crisp QR codes
+                target_width,
+                target_height,
+                image::imageops::FilterType::Nearest, // Use nearest neighbor for crisp QR codes
             );
-            
+
             // Convert image to RGB format
             let rgb_image = upscaled_image.to_rgb8();
             let rgb_data = rgb_image.as_raw();
@@ -154,31 +175,37 @@ impl VideoEncoder {
                 target_width,
                 target_height,
                 ffmpeg_next::software::scaling::Flags::BILINEAR,
-            ).map_err(|e| MemvidError::Video(format!("Failed to create scaler: {}", e)))?;
+            )
+            .map_err(|e| MemvidError::Video(format!("Failed to create scaler: {}", e)))?;
 
-            scaler.run(&frame, &mut yuv_frame)
+            scaler
+                .run(&frame, &mut yuv_frame)
                 .map_err(|e| MemvidError::Video(format!("Failed to scale frame: {}", e)))?;
 
             yuv_frame.set_pts(frame.pts());
 
             // Send frame to encoder
-            encoder.send_frame(&yuv_frame)
+            encoder
+                .send_frame(&yuv_frame)
                 .map_err(|e| MemvidError::Video(format!("Failed to send frame: {}", e)))?;
 
             // Receive and write packets
-            self.receive_and_write_packets(encoder, output_ctx, stream_index).await?;
-            
+            self.receive_and_write_packets(encoder, output_ctx, stream_index)
+                .await?;
+
             if (i + 1) % 10 == 0 {
                 log::info!("Encoded {}/{} frames", i + 1, frames.len());
             }
         }
 
         // Flush encoder
-        encoder.send_eof()
+        encoder
+            .send_eof()
             .map_err(|e| MemvidError::Video(format!("Failed to send EOF: {}", e)))?;
 
         // Receive remaining packets
-        self.receive_and_write_packets(encoder, output_ctx, stream_index).await?;
+        self.receive_and_write_packets(encoder, output_ctx, stream_index)
+            .await?;
 
         Ok(())
     }
@@ -194,7 +221,8 @@ impl VideoEncoder {
 
         while encoder.receive_packet(&mut packet).is_ok() {
             packet.set_stream(stream_index);
-            packet.write_interleaved(output_ctx)
+            packet
+                .write_interleaved(output_ctx)
                 .map_err(|e| MemvidError::Video(format!("Failed to write packet: {}", e)))?;
         }
 
@@ -260,15 +288,17 @@ mod tests {
         // Create a test QR code image
         let qr_encoder = QrEncoder::default();
         let qr_frame = qr_encoder.encode_text("Test QR code").unwrap();
-        
+
         // Create temporary output file
         let temp_file = NamedTempFile::with_suffix(".mp4").unwrap();
         let output_path = temp_file.path().to_str().unwrap();
 
         // Test encoding with QR upscaling
         let video_encoder = VideoEncoder::default();
-        let result = video_encoder.encode_single_image(&qr_frame.image, output_path).await;
-        
+        let result = video_encoder
+            .encode_single_image(&qr_frame.image, output_path)
+            .await;
+
         // Should succeed or fail gracefully (depending on FFmpeg availability)
         match result {
             Ok(_) => {
@@ -285,4 +315,4 @@ mod tests {
             Err(e) => panic!("Unexpected error: {}", e),
         }
     }
-} 
+}

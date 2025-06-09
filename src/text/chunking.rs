@@ -3,8 +3,8 @@
 //! This module provides various text chunking strategies for processing documents
 //! into manageable segments for QR encoding.
 
-use crate::error::{MemvidError, Result};
 use crate::config::ChunkingConfig;
+use crate::error::{MemvidError, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -13,25 +13,25 @@ use serde::{Deserialize, Serialize};
 pub struct ChunkMetadata {
     /// Unique chunk identifier
     pub id: usize,
-    
+
     /// The actual text content
     pub text: String,
-    
+
     /// Original document source
     pub source: Option<String>,
-    
+
     /// Page number (for PDFs)
     pub page: Option<u32>,
-    
+
     /// Character offset in original document
     pub offset: usize,
-    
+
     /// Length of the chunk in characters
     pub length: usize,
-    
+
     /// Frame number in the video (set during encoding)
     pub frame: Option<u32>,
-    
+
     /// Embedding vector (set during ML processing)
     pub embedding: Option<Vec<f32>>,
 }
@@ -41,13 +41,13 @@ pub struct ChunkMetadata {
 pub enum ChunkingStrategy {
     /// Simple character-based chunking with overlap
     Character,
-    
+
     /// Sentence-aware chunking (preserves sentence boundaries)
     Sentence,
-    
+
     /// Paragraph-aware chunking
     Paragraph,
-    
+
     /// Token-based chunking (requires tokenizer)
     Token,
 }
@@ -63,12 +63,14 @@ pub struct TextChunker {
 impl TextChunker {
     /// Create a new text chunker with the given configuration
     pub fn new(config: ChunkingConfig, strategy: ChunkingStrategy) -> Result<Self> {
-        let sentence_regex = Regex::new(r"[.!?]+\s+")
-            .map_err(|e| MemvidError::TextProcessing(format!("Failed to compile sentence regex: {}", e)))?;
-        
-        let paragraph_regex = Regex::new(r"\n\s*\n")
-            .map_err(|e| MemvidError::TextProcessing(format!("Failed to compile paragraph regex: {}", e)))?;
-        
+        let sentence_regex = Regex::new(r"[.!?]+\s+").map_err(|e| {
+            MemvidError::TextProcessing(format!("Failed to compile sentence regex: {}", e))
+        })?;
+
+        let paragraph_regex = Regex::new(r"\n\s*\n").map_err(|e| {
+            MemvidError::TextProcessing(format!("Failed to compile paragraph regex: {}", e))
+        })?;
+
         Ok(Self {
             config,
             strategy,
@@ -85,14 +87,12 @@ impl TextChunker {
     /// Chunk text into overlapping segments
     pub fn chunk_text(&self, text: &str, source: Option<String>) -> Result<Vec<ChunkMetadata>> {
         let text = self.preprocess_text(text);
-        
+
         match self.strategy {
             ChunkingStrategy::Character => self.chunk_by_characters(&text, source),
             ChunkingStrategy::Sentence => self.chunk_by_sentences(&text, source),
             ChunkingStrategy::Paragraph => self.chunk_by_paragraphs(&text, source),
-            ChunkingStrategy::Token => {
-                self.chunk_by_tokens(&text, source)
-            }
+            ChunkingStrategy::Token => self.chunk_by_tokens(&text, source),
         }
     }
 
@@ -105,17 +105,21 @@ impl TextChunker {
             .filter(|line| !line.is_empty())
             .collect::<Vec<_>>()
             .join(" ");
-        
+
         // Remove excessive whitespace
         let whitespace_regex = Regex::new(r"\s+").unwrap();
         whitespace_regex.replace_all(&normalized, " ").to_string()
     }
 
     /// Character-based chunking with overlap
-    fn chunk_by_characters(&self, text: &str, source: Option<String>) -> Result<Vec<ChunkMetadata>> {
+    fn chunk_by_characters(
+        &self,
+        text: &str,
+        source: Option<String>,
+    ) -> Result<Vec<ChunkMetadata>> {
         let mut chunks = Vec::new();
         let mut id = 0;
-        
+
         if text.len() <= self.config.chunk_size {
             // Text is small enough to be a single chunk
             chunks.push(ChunkMetadata {
@@ -135,7 +139,7 @@ impl TextChunker {
         while start < text.len() {
             let end = std::cmp::min(start + self.config.chunk_size, text.len());
             let chunk_text = text[start..end].to_string();
-            
+
             // Skip chunks that are too small (except for the last chunk)
             if chunk_text.len() >= self.config.min_chunk_size || end == text.len() {
                 chunks.push(ChunkMetadata {
@@ -150,10 +154,10 @@ impl TextChunker {
                 });
                 id += 1;
             }
-            
+
             // Move start position with overlap
             start += self.config.chunk_size.saturating_sub(self.config.overlap);
-            
+
             // Prevent infinite loop if overlap is too large
             if start <= chunks.last().map(|c| c.offset).unwrap_or(0) {
                 start = chunks.last().map(|c| c.offset + c.length).unwrap_or(0);
@@ -185,9 +189,9 @@ impl TextChunker {
             };
 
             // Check if adding this sentence would exceed chunk size
-            if !current_chunk.is_empty() && 
-               (current_chunk.len() + sentence_with_space.len()) > self.config.chunk_size {
-                
+            if !current_chunk.is_empty()
+                && (current_chunk.len() + sentence_with_space.len()) > self.config.chunk_size
+            {
                 // Finalize current chunk
                 if current_chunk.len() >= self.config.min_chunk_size {
                     chunks.push(ChunkMetadata {
@@ -232,7 +236,11 @@ impl TextChunker {
     }
 
     /// Paragraph-aware chunking
-    fn chunk_by_paragraphs(&self, text: &str, source: Option<String>) -> Result<Vec<ChunkMetadata>> {
+    fn chunk_by_paragraphs(
+        &self,
+        text: &str,
+        source: Option<String>,
+    ) -> Result<Vec<ChunkMetadata>> {
         let paragraphs: Vec<&str> = self.paragraph_regex.split(text).collect();
         let mut chunks = Vec::new();
         let mut id = 0;
@@ -253,9 +261,9 @@ impl TextChunker {
             };
 
             // Check if adding this paragraph would exceed chunk size
-            if !current_chunk.is_empty() && 
-               (current_chunk.len() + paragraph_with_newline.len()) > self.config.chunk_size {
-                
+            if !current_chunk.is_empty()
+                && (current_chunk.len() + paragraph_with_newline.len()) > self.config.chunk_size
+            {
                 // Finalize current chunk
                 if current_chunk.len() >= self.config.min_chunk_size {
                     chunks.push(ChunkMetadata {
@@ -317,9 +325,9 @@ impl TextChunker {
             };
 
             // Check if adding this token would exceed chunk size
-            if !current_chunk.is_empty() && 
-               (current_chunk.len() + token_with_space.len()) > self.config.chunk_size {
-                
+            if !current_chunk.is_empty()
+                && (current_chunk.len() + token_with_space.len()) > self.config.chunk_size
+            {
                 // Finalize current chunk
                 if current_chunk.len() >= self.config.min_chunk_size {
                     chunks.push(ChunkMetadata {
@@ -340,7 +348,7 @@ impl TextChunker {
                     let current_tokens: Vec<&str> = current_chunk.split_whitespace().collect();
                     let overlap_count = std::cmp::min(
                         self.config.overlap / 10, // Approximate tokens in overlap
-                        current_tokens.len()
+                        current_tokens.len(),
                     );
                     if overlap_count > 0 {
                         current_tokens[current_tokens.len() - overlap_count..].join(" ")
@@ -396,11 +404,12 @@ mod tests {
                 max_chunk_size: 50,
             },
             ChunkingStrategy::Character,
-        ).unwrap();
+        )
+        .unwrap();
 
         let text = "This is a test text for chunking functionality.";
         let chunks = chunker.chunk_text(text, None).unwrap();
-        
+
         assert!(!chunks.is_empty());
         assert_eq!(chunks[0].id, 0);
         assert!(chunks[0].text.len() <= 10);
@@ -416,11 +425,14 @@ mod tests {
                 max_chunk_size: 100,
             },
             ChunkingStrategy::Sentence,
-        ).unwrap();
+        )
+        .unwrap();
 
         let text = "First sentence. Second sentence! Third sentence? Fourth sentence.";
-        let chunks = chunker.chunk_text(text, Some("test.txt".to_string())).unwrap();
-        
+        let chunks = chunker
+            .chunk_text(text, Some("test.txt".to_string()))
+            .unwrap();
+
         assert!(!chunks.is_empty());
         assert_eq!(chunks[0].source, Some("test.txt".to_string()));
     }
@@ -430,7 +442,7 @@ mod tests {
         let chunker = TextChunker::with_default_config().unwrap();
         let text = "Short text";
         let chunks = chunker.chunk_text(text, None).unwrap();
-        
+
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, text);
     }
@@ -459,19 +471,21 @@ mod tests {
         // Equivalent to Python test_chunk_text
         let chunker = TextChunker::with_default_config().unwrap();
         let text = "This is sentence one. This is sentence two. This is sentence three. This is sentence four.";
-        
-        let chunks = chunker.chunk_text(text, Some("test_doc".to_string())).unwrap();
-        
+
+        let chunks = chunker
+            .chunk_text(text, Some("test_doc".to_string()))
+            .unwrap();
+
         // Verify we got chunks
         assert!(!chunks.is_empty());
-        
+
         // Verify all chunks have content
         for chunk in &chunks {
             assert!(!chunk.text.is_empty());
             assert_eq!(chunk.source, Some("test_doc".to_string()));
             assert!(chunk.length > 0);
         }
-        
+
         // Verify chunk IDs are sequential
         for (i, chunk) in chunks.iter().enumerate() {
             assert_eq!(chunk.id, i);
@@ -488,18 +502,20 @@ mod tests {
             max_chunk_size: 4096,
         };
         let chunker = TextChunker::new(config, ChunkingStrategy::Character).unwrap();
-        
+
         let text = "This is a test. ".repeat(50); // 800 characters
-        let chunks = chunker.chunk_text(&text, Some("long_doc".to_string())).unwrap();
-        
+        let chunks = chunker
+            .chunk_text(&text, Some("long_doc".to_string()))
+            .unwrap();
+
         // Should have multiple chunks due to size
         assert!(chunks.len() > 1);
-        
+
         // Verify overlap is working
         if chunks.len() > 1 {
             let first_chunk = &chunks[0];
             let second_chunk = &chunks[1];
-            
+
             // There should be some overlap in content
             let first_end = &first_chunk.text[first_chunk.text.len().saturating_sub(20)..];
             assert!(second_chunk.text.contains(first_end.trim()));
@@ -511,12 +527,14 @@ mod tests {
         // Test that metadata is preserved correctly
         let chunker = TextChunker::with_default_config().unwrap();
         let text = "Short text for metadata test.";
-        
-        let chunks = chunker.chunk_text(text, Some("metadata_test".to_string())).unwrap();
-        
+
+        let chunks = chunker
+            .chunk_text(text, Some("metadata_test".to_string()))
+            .unwrap();
+
         assert_eq!(chunks.len(), 1);
         let chunk = &chunks[0];
-        
+
         assert_eq!(chunk.id, 0);
         assert_eq!(chunk.text, text);
         assert_eq!(chunk.source, Some("metadata_test".to_string()));
@@ -531,16 +549,18 @@ mod tests {
     fn test_python_equivalent_sentence_chunking() {
         // Test sentence-aware chunking
         let config = ChunkingConfig {
-            chunk_size: 50,  // Small size to force multiple chunks
+            chunk_size: 50, // Small size to force multiple chunks
             overlap: 10,
             min_chunk_size: 10,
             max_chunk_size: 4096,
         };
         let chunker = TextChunker::new(config, ChunkingStrategy::Sentence).unwrap();
-        
+
         let text = "First sentence here. Second sentence is longer than the first. Third sentence completes the test.";
-        let chunks = chunker.chunk_text(text, Some("sentence_test".to_string())).unwrap();
-        
+        let chunks = chunker
+            .chunk_text(text, Some("sentence_test".to_string()))
+            .unwrap();
+
         // Should preserve sentence boundaries where possible
         for chunk in &chunks {
             // Verify chunks are not empty and have reasonable content
@@ -549,4 +569,4 @@ mod tests {
             assert!(text.len() > 0);
         }
     }
-} 
+}

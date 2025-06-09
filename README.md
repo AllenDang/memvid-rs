@@ -411,11 +411,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- Original [memvid](https://github.com/sudodom/memvid) Python implementation
+- Original [memvid](https://github.com/Olow304/memvid) Python implementation
 - [HuggingFace Candle](https://github.com/huggingface/candle) for TRUE BERT neural network inference in pure Rust
 - [candle-transformers](https://github.com/huggingface/candle) for real transformer model implementations
 - [instant-distance](https://github.com/instant-labs/instant-distance) for high-performance HNSW vector search
-- [qrcode-rs](https://github.com/kennytm/qrcode) and [rqrr](https://github.com/WanzenBug/rqrr) for QR processing
+- [qrcode-rs](https://github.com/kennytm/qrcode-rust) and [rqrr](https://github.com/WanzenBug/rqrr) for QR processing
 - [rusqlite](https://github.com/rusqlite/rusqlite) for embedded SQLite database support
 - The Rust community for the amazing pure Rust ecosystem enabling zero-dependency ML
 

@@ -6,8 +6,8 @@
 use crate::error::{MemvidError, Result};
 use candle_core::Device;
 use serde::{Deserialize, Serialize};
-use std::sync::Once;
 use std::ptr;
+use std::sync::Once;
 
 /// Device types supported for ML inference
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -51,31 +51,39 @@ impl DeviceManager {
     /// Initialize device manager with automatic device detection
     pub fn initialize() -> Result<&'static DeviceManager> {
         unsafe {
-            DEVICE_MANAGER_INIT.call_once(|| {
-                match Self::new() {
-                    Ok(manager) => {
-                        log::info!(
-                            "Initialized device manager with optimal device: {}",
-                            manager.current_device.name
-                        );
-                        DEVICE_MANAGER = Some(manager);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to initialize device manager: {}", e);
-                    }
+            DEVICE_MANAGER_INIT.call_once(|| match Self::new() {
+                Ok(manager) => {
+                    log::info!(
+                        "Initialized device manager with optimal device: {}",
+                        manager.current_device.name
+                    );
+                    DEVICE_MANAGER = Some(manager);
+                }
+                Err(e) => {
+                    log::error!("Failed to initialize device manager: {}", e);
                 }
             });
-            
-            ptr::addr_of!(DEVICE_MANAGER).as_ref().unwrap().as_ref()
-                .ok_or_else(|| MemvidError::MachineLearning("Device manager initialization failed".to_string()))
+
+            ptr::addr_of!(DEVICE_MANAGER)
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .ok_or_else(|| {
+                    MemvidError::MachineLearning("Device manager initialization failed".to_string())
+                })
         }
     }
 
     /// Get global device manager instance
     pub fn global() -> Result<&'static DeviceManager> {
         unsafe {
-            ptr::addr_of!(DEVICE_MANAGER).as_ref().unwrap().as_ref()
-                .ok_or_else(|| MemvidError::MachineLearning("Device manager not initialized".to_string()))
+            ptr::addr_of!(DEVICE_MANAGER)
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .ok_or_else(|| {
+                    MemvidError::MachineLearning("Device manager not initialized".to_string())
+                })
         }
     }
 
@@ -209,8 +217,6 @@ impl DeviceManager {
         Some(4 * 1024 * 1024 * 1024) // Assume 4GB as conservative estimate
     }
 
-
-
     /// Estimate Metal GPU memory
     #[cfg(feature = "metal")]
     fn estimate_metal_memory() -> Option<u64> {
@@ -248,19 +254,21 @@ mod tests {
     fn test_device_manager_initialization() {
         let manager = DeviceManager::initialize().unwrap();
         assert!(!manager.available_devices().is_empty());
-        
+
         // Should always have at least CPU
-        assert!(manager
-            .available_devices()
-            .iter()
-            .any(|d| matches!(d.device_type, DeviceType::Cpu)));
+        assert!(
+            manager
+                .available_devices()
+                .iter()
+                .any(|d| matches!(d.device_type, DeviceType::Cpu))
+        );
     }
 
     #[test]
     fn test_device_selection() {
         let manager = DeviceManager::initialize().unwrap();
         let current = manager.current_device();
-        
+
         // Should select a valid device
         assert!(!current.name.is_empty());
         assert!(current.compute_score > 0.0);
@@ -271,8 +279,8 @@ mod tests {
         let manager = DeviceManager::initialize().unwrap();
         let base_size = 16;
         let optimal = manager.optimal_batch_size(base_size);
-        
+
         assert!(optimal > 0);
         assert!(optimal <= base_size * 4); // Reasonable upper bound
     }
-} 
+}

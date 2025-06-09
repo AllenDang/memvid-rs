@@ -24,7 +24,10 @@ pub struct VectorPoint {
 
 impl VectorPoint {
     pub fn new(data: Vec<f32>, distance_metric: DistanceMetric) -> Self {
-        Self { data, distance_metric }
+        Self {
+            data,
+            distance_metric,
+        }
     }
 }
 
@@ -32,20 +35,39 @@ impl Point for VectorPoint {
     fn distance(&self, other: &Self) -> f32 {
         match self.distance_metric {
             DistanceMetric::Cosine => {
-                let dot = self.data.iter().zip(&other.data).map(|(a, b)| a * b).sum::<f32>();
+                let dot = self
+                    .data
+                    .iter()
+                    .zip(&other.data)
+                    .map(|(a, b)| a * b)
+                    .sum::<f32>();
                 let norm_a = self.data.iter().map(|x| x * x).sum::<f32>().sqrt();
                 let norm_b = other.data.iter().map(|x| x * x).sum::<f32>().sqrt();
-                if norm_a == 0.0 || norm_b == 0.0 { 1.0 } else { 1.0 - (dot / (norm_a * norm_b)) }
+                if norm_a == 0.0 || norm_b == 0.0 {
+                    1.0
+                } else {
+                    1.0 - (dot / (norm_a * norm_b))
+                }
             }
-            DistanceMetric::Euclidean => {
-                self.data.iter().zip(&other.data).map(|(a, b)| (a - b).powi(2)).sum::<f32>().sqrt()
-            }
-            DistanceMetric::Manhattan => {
-                self.data.iter().zip(&other.data).map(|(a, b)| (a - b).abs()).sum()
-            }
-            DistanceMetric::DotProduct => {
-                -self.data.iter().zip(&other.data).map(|(a, b)| a * b).sum::<f32>()
-            }
+            DistanceMetric::Euclidean => self
+                .data
+                .iter()
+                .zip(&other.data)
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f32>()
+                .sqrt(),
+            DistanceMetric::Manhattan => self
+                .data
+                .iter()
+                .zip(&other.data)
+                .map(|(a, b)| (a - b).abs())
+                .sum(),
+            DistanceMetric::DotProduct => -self
+                .data
+                .iter()
+                .zip(&other.data)
+                .map(|(a, b)| a * b)
+                .sum::<f32>(),
         }
     }
 }
@@ -148,7 +170,12 @@ impl VectorSearchIndex {
     }
 
     /// Add vector to the index with HNSW support
-    pub fn add_vector(&mut self, id: usize, vector: &Embedding, metadata: Option<HashMap<String, serde_json::Value>>) -> Result<()> {
+    pub fn add_vector(
+        &mut self,
+        id: usize,
+        vector: &Embedding,
+        metadata: Option<HashMap<String, serde_json::Value>>,
+    ) -> Result<()> {
         if vector.len() != self.dimension {
             return Err(MemvidError::MachineLearning(format!(
                 "Vector dimension {} doesn't match index dimension {}",
@@ -179,7 +206,10 @@ impl VectorSearchIndex {
         self.hnsw_search = None;
 
         self.size = self.size.max(id + 1);
-        log::debug!("Added vector {} to index (HNSW will rebuild on next search)", id);
+        log::debug!(
+            "Added vector {} to index (HNSW will rebuild on next search)",
+            id
+        );
         Ok(())
     }
 
@@ -211,20 +241,24 @@ impl VectorSearchIndex {
                 return Ok(Vec::new());
             }
         }
-        
+
         // For now, use a placeholder HNSW search result
         // Will implement proper instant-distance integration in a follow-up
         log::debug!("Using HNSW-style search (placeholder implementation)");
-        
+
         // Fall back to optimized exact search for now
         let mut exact_results = self.search_exact(query, k)?;
-        
+
         // Add some jitter to simulate HNSW approximate results
         for result in &mut exact_results {
             result.distance *= 1.0 + (result.id as f32 * 0.001) % 0.01; // Small variance
         }
-        
-                log::debug!("HNSW search returned {} results for k={}", exact_results.len(), k);
+
+        log::debug!(
+            "HNSW search returned {} results for k={}",
+            exact_results.len(),
+            k
+        );
         Ok(exact_results)
     }
 
@@ -241,7 +275,8 @@ impl VectorSearchIndex {
         let mut distances: Vec<(usize, f32)> = Vec::new();
 
         for (id, vector) in self.flat_vectors.iter().enumerate() {
-            if vector.iter().any(|&x| x != 0.0) { // Skip empty vectors
+            if vector.iter().any(|&x| x != 0.0) {
+                // Skip empty vectors
                 let distance = self.compute_distance(query, vector)?;
                 distances.push((id, distance));
             }
@@ -278,7 +313,7 @@ impl VectorSearchIndex {
         let dot = Self::dot_product(a, b);
         let norm_a = a.iter().map(|x| x * x).sum::<f32>().sqrt();
         let norm_b = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        
+
         if norm_a == 0.0 || norm_b == 0.0 {
             1.0 // Maximum distance for zero vectors
         } else {
@@ -297,10 +332,7 @@ impl VectorSearchIndex {
 
     /// Manhattan distance (L1)
     fn manhattan_distance(a: &Embedding, b: &Embedding) -> f32 {
-        a.iter()
-            .zip(b.iter())
-            .map(|(x, y)| (x - y).abs())
-            .sum()
+        a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
     }
 
     /// Dot product
@@ -320,43 +352,54 @@ impl VectorSearchIndex {
             return Ok(());
         }
 
-        log::info!("Building HNSW index with {} vectors, dimension {}", self.hnsw_points.len(), self.dimension);
-        
+        log::info!(
+            "Building HNSW index with {} vectors, dimension {}",
+            self.hnsw_points.len(),
+            self.dimension
+        );
+
         // Use instant-distance to build HNSW index
         let builder = Builder::default();
-        
+
         // Convert our vectors to VectorPoints
-        let points: Vec<VectorPoint> = self.hnsw_points
+        let points: Vec<VectorPoint> = self
+            .hnsw_points
             .iter()
             .map(|vec| VectorPoint::new(vec.clone(), self.config.distance_metric.clone()))
             .collect();
 
         let (hnsw, _point_ids) = builder.build_hnsw(points);
-        
+
         self.hnsw_search = Some(hnsw);
         self.hnsw_built = true;
-        
-        log::info!("HNSW index built successfully with {} points", self.hnsw_points.len());
+
+        log::info!(
+            "HNSW index built successfully with {} points",
+            self.hnsw_points.len()
+        );
         Ok(())
     }
 
     /// Save index to disk
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let data = bincode::serialize(&self.flat_vectors)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to serialize index: {}", e)))?;
-        
+        let data = bincode::serialize(&self.flat_vectors).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to serialize index: {}", e))
+        })?;
+
         std::fs::write(path.as_ref().join("vectors.bin"), data)?;
-        
-        let metadata_data = serde_json::to_string(&self.metadata)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to serialize metadata: {}", e)))?;
-        
+
+        let metadata_data = serde_json::to_string(&self.metadata).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to serialize metadata: {}", e))
+        })?;
+
         std::fs::write(path.as_ref().join("metadata.json"), metadata_data)?;
-        
-        let config_data = serde_json::to_string(&self.config)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to serialize config: {}", e)))?;
-        
+
+        let config_data = serde_json::to_string(&self.config).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to serialize config: {}", e))
+        })?;
+
         std::fs::write(path.as_ref().join("config.json"), config_data)?;
-        
+
         log::info!("Saved vector search index to {:?}", path.as_ref());
         Ok(())
     }
@@ -364,16 +407,20 @@ impl VectorSearchIndex {
     /// Load index from disk
     pub fn load<P: AsRef<Path>>(path: P, dimension: usize) -> Result<Self> {
         let vectors_data = std::fs::read(path.as_ref().join("vectors.bin"))?;
-        let flat_vectors: Vec<Embedding> = bincode::deserialize(&vectors_data)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to deserialize vectors: {}", e)))?;
+        let flat_vectors: Vec<Embedding> = bincode::deserialize(&vectors_data).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to deserialize vectors: {}", e))
+        })?;
 
         let metadata_data = std::fs::read_to_string(path.as_ref().join("metadata.json"))?;
-        let metadata: HashMap<usize, HashMap<String, serde_json::Value>> = serde_json::from_str(&metadata_data)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to deserialize metadata: {}", e)))?;
+        let metadata: HashMap<usize, HashMap<String, serde_json::Value>> =
+            serde_json::from_str(&metadata_data).map_err(|e| {
+                MemvidError::MachineLearning(format!("Failed to deserialize metadata: {}", e))
+            })?;
 
         let config_data = std::fs::read_to_string(path.as_ref().join("config.json"))?;
-        let config: SearchConfig = serde_json::from_str(&config_data)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to deserialize config: {}", e)))?;
+        let config: SearchConfig = serde_json::from_str(&config_data).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to deserialize config: {}", e))
+        })?;
 
         let mut index = Self::new(dimension, config)?;
         index.flat_vectors = flat_vectors;
@@ -382,23 +429,57 @@ impl VectorSearchIndex {
 
         // TODO: Rebuild HNSW index when implemented
 
-        log::info!("Loaded vector search index from {:?} with {} vectors", path.as_ref(), index.size);
+        log::info!(
+            "Loaded vector search index from {:?} with {} vectors",
+            path.as_ref(),
+            index.size
+        );
         Ok(index)
     }
 
     /// Get index statistics including HNSW information
     pub fn stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        stats.insert("size".to_string(), serde_json::Value::Number(self.size.into()));
-        stats.insert("dimension".to_string(), serde_json::Value::Number(self.dimension.into()));
-        stats.insert("has_hnsw".to_string(), serde_json::Value::Bool(self.hnsw_search.is_some()));
-        stats.insert("hnsw_built".to_string(), serde_json::Value::Bool(self.hnsw_built));
-        stats.insert("hnsw_points".to_string(), serde_json::Value::Number(self.hnsw_points.len().into()));
-        stats.insert("distance_metric".to_string(), serde_json::Value::String(format!("{:?}", self.config.distance_metric)));
-        stats.insert("metadata_count".to_string(), serde_json::Value::Number(self.metadata.len().into()));
-        stats.insert("max_connections".to_string(), serde_json::Value::Number(self.config.max_connections.into()));
-        stats.insert("ef_construction".to_string(), serde_json::Value::Number(self.config.ef_construction.into()));
-        stats.insert("ef_search".to_string(), serde_json::Value::Number(self.config.ef_search.into()));
+        stats.insert(
+            "size".to_string(),
+            serde_json::Value::Number(self.size.into()),
+        );
+        stats.insert(
+            "dimension".to_string(),
+            serde_json::Value::Number(self.dimension.into()),
+        );
+        stats.insert(
+            "has_hnsw".to_string(),
+            serde_json::Value::Bool(self.hnsw_search.is_some()),
+        );
+        stats.insert(
+            "hnsw_built".to_string(),
+            serde_json::Value::Bool(self.hnsw_built),
+        );
+        stats.insert(
+            "hnsw_points".to_string(),
+            serde_json::Value::Number(self.hnsw_points.len().into()),
+        );
+        stats.insert(
+            "distance_metric".to_string(),
+            serde_json::Value::String(format!("{:?}", self.config.distance_metric)),
+        );
+        stats.insert(
+            "metadata_count".to_string(),
+            serde_json::Value::Number(self.metadata.len().into()),
+        );
+        stats.insert(
+            "max_connections".to_string(),
+            serde_json::Value::Number(self.config.max_connections.into()),
+        );
+        stats.insert(
+            "ef_construction".to_string(),
+            serde_json::Value::Number(self.config.ef_construction.into()),
+        );
+        stats.insert(
+            "ef_search".to_string(),
+            serde_json::Value::Number(self.config.ef_search.into()),
+        );
         stats
     }
 
@@ -420,12 +501,12 @@ impl VectorSearchIndex {
         self.point_to_id.clear();
         self.id_to_point.clear();
         self.hnsw_built = false;
-        
+
         // Clear flat index
         self.flat_vectors.clear();
         self.metadata.clear();
         self.size = 0;
-        
+
         log::debug!("Vector search index cleared completely");
     }
 }
@@ -543,14 +624,14 @@ mod tests {
         index.build().unwrap();
 
         let query = vec![0.6, 0.4];
-        
+
         // Both searches should return reasonable results
         let exact_results = index.search_exact(&query, 2).unwrap();
         let approx_results = index.search_approximate(&query, 2).unwrap();
 
         assert_eq!(exact_results.len(), 2);
         assert_eq!(approx_results.len(), 2);
-        
+
         // The top result should be similar (allowing for approximation differences)
         assert_eq!(exact_results[0].id, approx_results[0].id);
     }
@@ -598,4 +679,4 @@ mod tests {
         assert_eq!(index.hnsw_points.len(), 0);
         assert_eq!(index.size, 0);
     }
-} 
+}

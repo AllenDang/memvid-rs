@@ -101,10 +101,10 @@ mod tests {
     fn test_error_chain() {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let memvid_error = MemvidError::from(io_error);
-        
+
         match memvid_error {
             MemvidError::Io(_) => (),
             _ => panic!("Expected Io error"),
         }
     }
-} 
+}

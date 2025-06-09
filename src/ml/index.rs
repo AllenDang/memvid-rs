@@ -2,7 +2,7 @@
 //!
 //! This module provides comprehensive index management capabilities including
 //! building, persistence, metadata management, and frame-to-chunk mapping.
-//! 
+//!
 //! Phase 3D enhancements include rich metadata management, context windows,
 //! parallel processing, and robust error recovery.
 
@@ -31,7 +31,10 @@ pub enum MetadataValue {
     /// Timestamp for temporal metadata
     Timestamp(chrono::DateTime<chrono::Utc>),
     /// Reference to another chunk or frame
-    Reference { chunk_id: Option<usize>, frame_id: Option<usize> },
+    Reference {
+        chunk_id: Option<usize>,
+        frame_id: Option<usize>,
+    },
 }
 
 /// Enhanced chunk metadata with rich typing and temporal information
@@ -199,7 +202,11 @@ impl IndexManager {
 
         let mut chunk_ids = Vec::new();
 
-        for ((chunk_text, embedding), &frame_number) in chunks.iter().zip(embeddings.iter()).zip(frame_numbers.iter()) {
+        for ((chunk_text, embedding), &frame_number) in chunks
+            .iter()
+            .zip(embeddings.iter())
+            .zip(frame_numbers.iter())
+        {
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
 
@@ -220,11 +227,21 @@ impl IndexManager {
 
             // Add to vector index
             let mut vector_metadata = HashMap::new();
-            vector_metadata.insert("frame".to_string(), serde_json::Value::Number(frame_number.into()));
-            vector_metadata.insert("text".to_string(), serde_json::Value::String(chunk_text.clone()));
-            vector_metadata.insert("length".to_string(), serde_json::Value::Number(chunk_text.len().into()));
+            vector_metadata.insert(
+                "frame".to_string(),
+                serde_json::Value::Number(frame_number.into()),
+            );
+            vector_metadata.insert(
+                "text".to_string(),
+                serde_json::Value::String(chunk_text.clone()),
+            );
+            vector_metadata.insert(
+                "length".to_string(),
+                serde_json::Value::Number(chunk_text.len().into()),
+            );
 
-            self.vector_index.add_vector(chunk_id, embedding, Some(vector_metadata))?;
+            self.vector_index
+                .add_vector(chunk_id, embedding, Some(vector_metadata))?;
 
             // Store metadata
             self.chunks.insert(chunk_id, chunk_metadata);
@@ -271,16 +288,26 @@ impl IndexManager {
 
         // Add to vector index
         let mut vector_metadata = HashMap::new();
-        vector_metadata.insert("frame".to_string(), serde_json::Value::Number(frame_number.into()));
-        vector_metadata.insert("text".to_string(), serde_json::Value::String(text.to_string()));
-        vector_metadata.insert("length".to_string(), serde_json::Value::Number(text.len().into()));
+        vector_metadata.insert(
+            "frame".to_string(),
+            serde_json::Value::Number(frame_number.into()),
+        );
+        vector_metadata.insert(
+            "text".to_string(),
+            serde_json::Value::String(text.to_string()),
+        );
+        vector_metadata.insert(
+            "length".to_string(),
+            serde_json::Value::Number(text.len().into()),
+        );
 
         // Add custom legacy metadata to vector metadata
         for (key, value) in &chunk_metadata.legacy_metadata {
             vector_metadata.insert(key.clone(), value.clone());
         }
 
-        self.vector_index.add_vector(chunk_id, embedding, Some(vector_metadata))?;
+        self.vector_index
+            .add_vector(chunk_id, embedding, Some(vector_metadata))?;
 
         // Store metadata
         self.chunks.insert(chunk_id, chunk_metadata);
@@ -301,7 +328,11 @@ impl IndexManager {
     }
 
     /// Search with exact algorithm (slower but more accurate)
-    pub fn search_exact(&self, query_embedding: &Embedding, top_k: usize) -> Result<Vec<SearchResult>> {
+    pub fn search_exact(
+        &self,
+        query_embedding: &Embedding,
+        top_k: usize,
+    ) -> Result<Vec<SearchResult>> {
         self.vector_index.search_exact(query_embedding, top_k)
     }
 
@@ -328,7 +359,10 @@ impl IndexManager {
     }
 
     /// Get all chunks for multiple frames
-    pub fn get_chunks_by_frames(&self, frame_numbers: &[usize]) -> HashMap<usize, Vec<&ChunkMetadata>> {
+    pub fn get_chunks_by_frames(
+        &self,
+        frame_numbers: &[usize],
+    ) -> HashMap<usize, Vec<&ChunkMetadata>> {
         let mut result = HashMap::new();
         for &frame_number in frame_numbers {
             result.insert(frame_number, self.get_chunks_by_frame(frame_number));
@@ -371,8 +405,9 @@ impl IndexManager {
         self.vector_index.save(path)?;
 
         // Save chunk metadata
-        let chunks_data = serde_json::to_string(&self.chunks)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to serialize chunks: {}", e)))?;
+        let chunks_data = serde_json::to_string(&self.chunks).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to serialize chunks: {}", e))
+        })?;
         std::fs::write(path.join("chunks.json"), chunks_data)?;
 
         // Save frame mappings
@@ -382,8 +417,9 @@ impl IndexManager {
             "next_chunk_id": self.next_chunk_id,
             "dimension": self.dimension
         });
-        let mappings_data = serde_json::to_string(&frame_mappings)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to serialize mappings: {}", e)))?;
+        let mappings_data = serde_json::to_string(&frame_mappings).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to serialize mappings: {}", e))
+        })?;
         std::fs::write(path.join("mappings.json"), mappings_data)?;
 
         log::info!("Saved index to {:?}", path);
@@ -396,33 +432,41 @@ impl IndexManager {
 
         // Load mappings first to get dimension
         let mappings_data = std::fs::read_to_string(path.join("mappings.json"))?;
-        let mappings: serde_json::Value = serde_json::from_str(&mappings_data)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to deserialize mappings: {}", e)))?;
+        let mappings: serde_json::Value = serde_json::from_str(&mappings_data).map_err(|e| {
+            MemvidError::MachineLearning(format!("Failed to deserialize mappings: {}", e))
+        })?;
 
-        let dimension = mappings["dimension"]
-            .as_u64()
-            .ok_or_else(|| MemvidError::MachineLearning("Missing dimension in mappings".to_string()))? as usize;
+        let dimension = mappings["dimension"].as_u64().ok_or_else(|| {
+            MemvidError::MachineLearning("Missing dimension in mappings".to_string())
+        })? as usize;
 
         // Load vector index
         let vector_index = VectorSearchIndex::load(path, dimension)?;
 
         // Load chunk metadata
         let chunks_data = std::fs::read_to_string(path.join("chunks.json"))?;
-        let chunks: HashMap<usize, ChunkMetadata> = serde_json::from_str(&chunks_data)
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to deserialize chunks: {}", e)))?;
+        let chunks: HashMap<usize, ChunkMetadata> =
+            serde_json::from_str(&chunks_data).map_err(|e| {
+                MemvidError::MachineLearning(format!("Failed to deserialize chunks: {}", e))
+            })?;
 
         // Load frame mappings
-        let frame_to_chunks: HashMap<usize, Vec<usize>> = serde_json::from_value(mappings["frame_to_chunks"].clone())
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to deserialize frame_to_chunks: {}", e)))?;
+        let frame_to_chunks: HashMap<usize, Vec<usize>> =
+            serde_json::from_value(mappings["frame_to_chunks"].clone()).map_err(|e| {
+                MemvidError::MachineLearning(format!(
+                    "Failed to deserialize frame_to_chunks: {}",
+                    e
+                ))
+            })?;
 
-        let chunk_to_frame: HashMap<usize, usize> = serde_json::from_value(mappings["chunk_to_frame"].clone())
-            .map_err(|e| MemvidError::MachineLearning(format!("Failed to deserialize chunk_to_frame: {}", e)))?;
+        let chunk_to_frame: HashMap<usize, usize> =
+            serde_json::from_value(mappings["chunk_to_frame"].clone()).map_err(|e| {
+                MemvidError::MachineLearning(format!("Failed to deserialize chunk_to_frame: {}", e))
+            })?;
 
-        let next_chunk_id = mappings["next_chunk_id"]
-            .as_u64()
-            .ok_or_else(|| MemvidError::MachineLearning("Missing next_chunk_id in mappings".to_string()))? as usize;
-
-
+        let next_chunk_id = mappings["next_chunk_id"].as_u64().ok_or_else(|| {
+            MemvidError::MachineLearning("Missing next_chunk_id in mappings".to_string())
+        })? as usize;
 
         let manager = Self {
             vector_index,
@@ -433,7 +477,11 @@ impl IndexManager {
             next_chunk_id,
         };
 
-        log::info!("Loaded index from {:?} with {} chunks", path, manager.chunks.len());
+        log::info!(
+            "Loaded index from {:?} with {} chunks",
+            path,
+            manager.chunks.len()
+        );
         Ok(manager)
     }
 
@@ -449,9 +497,14 @@ impl IndexManager {
 
         // Estimate memory usage
         let vector_memory = total_chunks * self.dimension * std::mem::size_of::<f32>();
-        let metadata_memory = self.chunks.values().map(|chunk| chunk.text.len() + std::mem::size_of::<ChunkMetadata>())
+        let metadata_memory = self
+            .chunks
+            .values()
+            .map(|chunk| chunk.text.len() + std::mem::size_of::<ChunkMetadata>())
             .sum::<usize>();
-        let mapping_memory = (self.frame_to_chunks.len() + self.chunk_to_frame.len()) * std::mem::size_of::<usize>() * 2;
+        let mapping_memory = (self.frame_to_chunks.len() + self.chunk_to_frame.len())
+            * std::mem::size_of::<usize>()
+            * 2;
 
         IndexStats {
             total_chunks,
@@ -494,24 +547,38 @@ impl IndexManager {
     }
 
     /// Update chunk metadata (legacy JSON format)
-    pub fn update_chunk_metadata(&mut self, chunk_id: usize, metadata: HashMap<String, serde_json::Value>) -> Result<()> {
+    pub fn update_chunk_metadata(
+        &mut self,
+        chunk_id: usize,
+        metadata: HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
         if let Some(chunk) = self.chunks.get_mut(&chunk_id) {
             chunk.legacy_metadata = metadata;
             chunk.updated_at = chrono::Utc::now();
             Ok(())
         } else {
-            Err(MemvidError::MachineLearning(format!("Chunk {} not found", chunk_id)))
+            Err(MemvidError::MachineLearning(format!(
+                "Chunk {} not found",
+                chunk_id
+            )))
         }
     }
 
     /// Update chunk rich metadata
-    pub fn update_rich_metadata(&mut self, chunk_id: usize, metadata: HashMap<String, MetadataValue>) -> Result<()> {
+    pub fn update_rich_metadata(
+        &mut self,
+        chunk_id: usize,
+        metadata: HashMap<String, MetadataValue>,
+    ) -> Result<()> {
         if let Some(chunk) = self.chunks.get_mut(&chunk_id) {
             chunk.metadata = metadata;
             chunk.updated_at = chrono::Utc::now();
             Ok(())
         } else {
-            Err(MemvidError::MachineLearning(format!("Chunk {} not found", chunk_id)))
+            Err(MemvidError::MachineLearning(format!(
+                "Chunk {} not found",
+                chunk_id
+            )))
         }
     }
 
@@ -526,18 +593,25 @@ impl IndexManager {
     }
 
     /// Enhanced context window with rich configuration
-    pub fn get_enhanced_context_window(&self, chunk_id: usize, config: &ContextWindowConfig) -> Vec<ChunkMetadata> {
+    pub fn get_enhanced_context_window(
+        &self,
+        chunk_id: usize,
+        config: &ContextWindowConfig,
+    ) -> Vec<ChunkMetadata> {
         if let Some(chunk) = self.chunks.get(&chunk_id) {
             let mut context_chunks = Vec::new();
-            
+
             // Get chunks from current frame first
             let current_frame_chunks = self.get_chunks_by_frame(chunk.frame_number);
-            let chunk_position = current_frame_chunks.iter().position(|c| c.id == chunk_id).unwrap_or(0);
-            
+            let chunk_position = current_frame_chunks
+                .iter()
+                .position(|c| c.id == chunk_id)
+                .unwrap_or(0);
+
             // Add chunks before the target
             let start_idx = chunk_position.saturating_sub(config.before);
             let end_idx = (chunk_position + config.after + 1).min(current_frame_chunks.len());
-            
+
             for chunk_ref in &current_frame_chunks[start_idx..end_idx] {
                 if let Some(importance) = config.min_importance {
                     if chunk_ref.importance_score >= importance {
@@ -547,7 +621,7 @@ impl IndexManager {
                     context_chunks.push((*chunk_ref).clone());
                 }
             }
-            
+
             // Add chunks from adjacent frames if configured
             if config.include_adjacent_frames {
                 // Previous frame
@@ -563,7 +637,7 @@ impl IndexManager {
                         }
                     }
                 }
-                
+
                 // Next frame
                 let next_chunks = self.get_chunks_by_frame(chunk.frame_number + 1);
                 for chunk_ref in next_chunks.iter().take(config.after) {
@@ -576,18 +650,19 @@ impl IndexManager {
                     }
                 }
             }
-            
+
             // Apply max_total limit
             if let Some(max_total) = config.max_total {
                 context_chunks.truncate(max_total);
             }
-            
+
             // Sort by frame number and chunk position
             context_chunks.sort_by(|a, b| {
-                a.frame_number.cmp(&b.frame_number)
+                a.frame_number
+                    .cmp(&b.frame_number)
                     .then_with(|| a.id.cmp(&b.id))
             });
-            
+
             context_chunks
         } else {
             Vec::new()
@@ -604,7 +679,7 @@ impl IndexManager {
         tags: Option<&[Vec<String>]>,
     ) -> Result<(Vec<usize>, ProcessingStats)> {
         let start_time = Instant::now();
-        
+
         if chunks.len() != embeddings.len() || chunks.len() != frame_numbers.len() {
             return Err(MemvidError::MachineLearning(
                 "Chunks, embeddings, and frame numbers must have the same length".to_string(),
@@ -619,7 +694,7 @@ impl IndexManager {
                 ));
             }
         }
-        
+
         if let Some(tag_list) = tags {
             if tag_list.len() != chunks.len() {
                 return Err(MemvidError::MachineLearning(
@@ -635,11 +710,11 @@ impl IndexManager {
         // Process chunks in parallel batches for memory efficiency
         let batch_size = 100; // Process 100 chunks at a time
         let now = chrono::Utc::now();
-        
+
         for (batch_idx, chunk_batch) in chunks.chunks(batch_size).enumerate() {
             let batch_start = batch_idx * batch_size;
             let batch_end = (batch_start + chunk_batch.len()).min(chunks.len());
-            
+
             // Create batch of chunk metadata
             let batch_metadata: Vec<Result<ChunkMetadata>> = (batch_start..batch_end)
                 .into_par_iter()
@@ -647,14 +722,15 @@ impl IndexManager {
                     let chunk_id = self.next_chunk_id + i;
                     let importance = importance_scores.map(|s| s[i]).unwrap_or(0.5);
                     let chunk_tags = tags.map(|t| t[i].clone()).unwrap_or_default();
-                    
+
                     // Validate importance score
                     if !(0.0..=1.0).contains(&importance) {
-                        return Err(MemvidError::MachineLearning(
-                            format!("Importance score {} out of range [0.0, 1.0]", importance)
-                        ));
+                        return Err(MemvidError::MachineLearning(format!(
+                            "Importance score {} out of range [0.0, 1.0]",
+                            importance
+                        )));
                     }
-                    
+
                     Ok(ChunkMetadata {
                         id: chunk_id,
                         text: chunks[i].clone(),
@@ -676,31 +752,48 @@ impl IndexManager {
                 match metadata_result {
                     Ok(chunk_metadata) => {
                         let chunk_id = chunk_metadata.id;
-                        
+
                         // Add to vector index with retry logic
                         let mut attempts = 0;
                         let max_attempts = 3;
                         let mut last_error = None;
-                        
+
                         while attempts < max_attempts {
                             let mut vector_metadata = HashMap::new();
-                                                         vector_metadata.insert("frame".to_string(), serde_json::json!(chunk_metadata.frame_number));
-                             vector_metadata.insert("text".to_string(), serde_json::Value::String(chunk_metadata.text.clone()));
-                             vector_metadata.insert("length".to_string(), serde_json::json!(chunk_metadata.length));
-                             vector_metadata.insert("importance".to_string(), serde_json::json!(chunk_metadata.importance_score));
-                            
-                            match self.vector_index.add_vector(chunk_id, &embeddings[chunk_idx], Some(vector_metadata)) {
+                            vector_metadata.insert(
+                                "frame".to_string(),
+                                serde_json::json!(chunk_metadata.frame_number),
+                            );
+                            vector_metadata.insert(
+                                "text".to_string(),
+                                serde_json::Value::String(chunk_metadata.text.clone()),
+                            );
+                            vector_metadata.insert(
+                                "length".to_string(),
+                                serde_json::json!(chunk_metadata.length),
+                            );
+                            vector_metadata.insert(
+                                "importance".to_string(),
+                                serde_json::json!(chunk_metadata.importance_score),
+                            );
+
+                            match self.vector_index.add_vector(
+                                chunk_id,
+                                &embeddings[chunk_idx],
+                                Some(vector_metadata),
+                            ) {
                                 Ok(()) => {
                                     // Store metadata
                                     self.chunks.insert(chunk_id, chunk_metadata.clone());
-                                    
+
                                     // Update frame mappings
                                     self.frame_to_chunks
                                         .entry(chunk_metadata.frame_number)
                                         .or_default()
                                         .push(chunk_id);
-                                    self.chunk_to_frame.insert(chunk_id, chunk_metadata.frame_number);
-                                    
+                                    self.chunk_to_frame
+                                        .insert(chunk_id, chunk_metadata.frame_number);
+
                                     chunk_ids.push(chunk_id);
                                     successful_operations += 1;
                                     break;
@@ -709,14 +802,21 @@ impl IndexManager {
                                     attempts += 1;
                                     last_error = Some(e);
                                     if attempts < max_attempts {
-                                        std::thread::sleep(Duration::from_millis(100 * attempts as u64));
+                                        std::thread::sleep(Duration::from_millis(
+                                            100 * attempts as u64,
+                                        ));
                                     }
                                 }
                             }
                         }
-                        
+
                         if attempts >= max_attempts {
-                            log::error!("Failed to add chunk {} after {} attempts: {:?}", chunk_id, max_attempts, last_error);
+                            log::error!(
+                                "Failed to add chunk {} after {} attempts: {:?}",
+                                chunk_id,
+                                max_attempts,
+                                last_error
+                            );
                             failed_operations += 1;
                         }
                     }
@@ -726,7 +826,7 @@ impl IndexManager {
                     }
                 }
             }
-            
+
             // Update next_chunk_id for next batch
             self.next_chunk_id += chunk_batch.len();
         }
@@ -747,8 +847,12 @@ impl IndexManager {
             peak_memory_mb: 0, // TODO: Implement memory monitoring
         };
 
-        log::info!("Parallel processing completed: {} successful, {} failed, {:?} total time", 
-                   successful_operations, failed_operations, total_time);
+        log::info!(
+            "Parallel processing completed: {} successful, {} failed, {:?} total time",
+            successful_operations,
+            failed_operations,
+            total_time
+        );
 
         Ok((chunk_ids, stats))
     }
@@ -763,12 +867,14 @@ impl IndexManager {
         min_importance: Option<f32>,
     ) -> Result<Vec<EnhancedSearchResult>> {
         // Perform base search
-        let search_results = self.vector_index.search_approximate(query_embedding, top_k * 2)?; // Get more to allow filtering
-        
+        let search_results = self
+            .vector_index
+            .search_approximate(query_embedding, top_k * 2)?; // Get more to allow filtering
+
         let mut enhanced_results = Vec::new();
         let default_config = ContextWindowConfig::default();
         let context_config = context_config.unwrap_or(&default_config);
-        
+
         for result in search_results.iter().take(top_k) {
             if let Some(chunk) = self.chunks.get(&result.id) {
                 // Apply filters
@@ -777,36 +883,36 @@ impl IndexManager {
                         continue;
                     }
                 }
-                
+
                 if let Some(min_imp) = min_importance {
                     if chunk.importance_score < min_imp {
                         continue;
                     }
                 }
-                
+
                 // Get context window
                 let context = self.get_enhanced_context_window(chunk.id, context_config);
-                
+
                 // Calculate relevance info
                 let relevance_info = RelevanceInfo {
                     score: 1.0 - result.distance, // Convert distance to similarity
-                    matched_terms: Vec::new(), // TODO: Implement term extraction
+                    matched_terms: Vec::new(),    // TODO: Implement term extraction
                     importance_factor: chunk.importance_score,
                     temporal_factor: 1.0, // TODO: Implement temporal relevance
                 };
-                
+
                 enhanced_results.push(EnhancedSearchResult {
                     result: result.clone(),
                     context,
                     relevance_info,
                 });
-                
+
                 if enhanced_results.len() >= top_k {
                     break;
                 }
             }
         }
-        
+
         Ok(enhanced_results)
     }
 
@@ -820,12 +926,8 @@ impl IndexManager {
                 } else {
                     tags.iter().any(|tag| chunk.tags.contains(tag))
                 };
-                
-                if matches {
-                    Some(chunk.clone())
-                } else {
-                    None
-                }
+
+                if matches { Some(chunk.clone()) } else { None }
             })
             .collect()
     }
@@ -834,21 +936,22 @@ impl IndexManager {
     pub fn update_importance_scores(&mut self, updates: HashMap<usize, f32>) -> Result<usize> {
         let mut updated_count = 0;
         let now = chrono::Utc::now();
-        
+
         for (chunk_id, new_score) in updates {
             if !(0.0..=1.0).contains(&new_score) {
-                return Err(MemvidError::MachineLearning(
-                    format!("Importance score {} out of range [0.0, 1.0]", new_score)
-                ));
+                return Err(MemvidError::MachineLearning(format!(
+                    "Importance score {} out of range [0.0, 1.0]",
+                    new_score
+                )));
             }
-            
+
             if let Some(chunk) = self.chunks.get_mut(&chunk_id) {
                 chunk.importance_score = new_score;
                 chunk.updated_at = now;
                 updated_count += 1;
             }
         }
-        
+
         Ok(updated_count)
     }
 
@@ -864,7 +967,11 @@ impl IndexManager {
 
         // Calculate average importance score
         let avg_importance_score = if total_chunks > 0 {
-            self.chunks.values().map(|c| c.importance_score).sum::<f32>() / total_chunks as f32
+            self.chunks
+                .values()
+                .map(|c| c.importance_score)
+                .sum::<f32>()
+                / total_chunks as f32
         } else {
             0.0
         };
@@ -876,7 +983,7 @@ impl IndexManager {
                 *tag_counts.entry(tag.clone()).or_insert(0) += 1;
             }
         }
-        
+
         let mut common_tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
         common_tags.sort_by(|a, b| b.1.cmp(&a.1));
         common_tags.truncate(10); // Top 10 tags
@@ -885,7 +992,7 @@ impl IndexManager {
         let temporal_range = if !self.chunks.is_empty() {
             let mut min_time = None;
             let mut max_time = None;
-            
+
             for chunk in self.chunks.values() {
                 if min_time.is_none() || chunk.created_at < min_time.unwrap() {
                     min_time = Some(chunk.created_at);
@@ -894,7 +1001,7 @@ impl IndexManager {
                     max_time = Some(chunk.created_at);
                 }
             }
-            
+
             if let (Some(min), Some(max)) = (min_time, max_time) {
                 Some((min, max))
             } else {
@@ -906,9 +1013,14 @@ impl IndexManager {
 
         // Estimate memory usage
         let vector_memory = total_chunks * self.dimension * std::mem::size_of::<f32>();
-        let metadata_memory = self.chunks.values().map(|chunk| chunk.text.len() + std::mem::size_of::<ChunkMetadata>())
+        let metadata_memory = self
+            .chunks
+            .values()
+            .map(|chunk| chunk.text.len() + std::mem::size_of::<ChunkMetadata>())
             .sum::<usize>();
-        let mapping_memory = (self.frame_to_chunks.len() + self.chunk_to_frame.len()) * std::mem::size_of::<usize>() * 2;
+        let mapping_memory = (self.frame_to_chunks.len() + self.chunk_to_frame.len())
+            * std::mem::size_of::<usize>()
+            * 2;
 
         IndexStats {
             total_chunks,
@@ -946,7 +1058,9 @@ mod tests {
         let embeddings = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
         let frame_numbers = vec![0, 1];
 
-        let chunk_ids = manager.add_chunks(&chunks, &embeddings, &frame_numbers).unwrap();
+        let chunk_ids = manager
+            .add_chunks(&chunks, &embeddings, &frame_numbers)
+            .unwrap();
         assert_eq!(chunk_ids.len(), 2);
         assert_eq!(manager.chunk_count(), 2);
         assert_eq!(manager.frame_count(), 2);
@@ -957,9 +1071,15 @@ mod tests {
         let mut manager = IndexManager::new(2, None).unwrap();
 
         // Add multiple chunks to same frame
-        let chunk_id1 = manager.add_chunk("Chunk 1", &vec![1.0, 0.0], 0, None).unwrap();
-        let chunk_id2 = manager.add_chunk("Chunk 2", &vec![0.0, 1.0], 0, None).unwrap();
-        let chunk_id3 = manager.add_chunk("Chunk 3", &vec![1.0, 1.0], 1, None).unwrap();
+        let chunk_id1 = manager
+            .add_chunk("Chunk 1", &vec![1.0, 0.0], 0, None)
+            .unwrap();
+        let chunk_id2 = manager
+            .add_chunk("Chunk 2", &vec![0.0, 1.0], 0, None)
+            .unwrap();
+        let chunk_id3 = manager
+            .add_chunk("Chunk 3", &vec![1.0, 1.0], 1, None)
+            .unwrap();
 
         // Test frame to chunks mapping
         let frame_0_chunks = manager.get_chunks_by_frame(0);
@@ -980,7 +1100,9 @@ mod tests {
 
         // Add chunks across multiple frames
         for i in 0..5 {
-            manager.add_chunk(&format!("Chunk {}", i), &vec![i as f32, 0.0], i, None).unwrap();
+            manager
+                .add_chunk(&format!("Chunk {}", i), &vec![i as f32, 0.0], i, None)
+                .unwrap();
         }
 
         // Test context window around frame 2
@@ -995,7 +1117,9 @@ mod tests {
 
         // Create and populate index
         let mut manager = IndexManager::new(2, None).unwrap();
-        manager.add_chunk("Test chunk", &vec![1.0, 0.0], 0, None).unwrap();
+        manager
+            .add_chunk("Test chunk", &vec![1.0, 0.0], 0, None)
+            .unwrap();
         manager.build().unwrap();
 
         // Save index
@@ -1012,9 +1136,15 @@ mod tests {
         let mut manager = IndexManager::new(3, None).unwrap();
 
         // Add test chunks
-        manager.add_chunk("Hello world", &vec![1.0, 0.0, 0.0], 0, None).unwrap();
-        manager.add_chunk("Test chunk", &vec![0.0, 1.0, 0.0], 1, None).unwrap();
-        manager.add_chunk("Another test", &vec![0.0, 0.0, 1.0], 2, None).unwrap();
+        manager
+            .add_chunk("Hello world", &vec![1.0, 0.0, 0.0], 0, None)
+            .unwrap();
+        manager
+            .add_chunk("Test chunk", &vec![0.0, 1.0, 0.0], 1, None)
+            .unwrap();
+        manager
+            .add_chunk("Another test", &vec![0.0, 0.0, 1.0], 2, None)
+            .unwrap();
 
         manager.build().unwrap();
 
@@ -1024,8 +1154,6 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].id, 0); // Should be most similar to first chunk
     }
-
-
 
     #[tokio::test]
     async fn test_phase_3d_enhanced_context_window() {
@@ -1048,7 +1176,9 @@ mod tests {
         ];
         let frame_numbers = vec![0, 0, 1, 1, 2];
 
-        manager.add_chunks(&chunks, &embeddings, &frame_numbers).unwrap();
+        manager
+            .add_chunks(&chunks, &embeddings, &frame_numbers)
+            .unwrap();
 
         // Test enhanced context window with configuration
         let config = ContextWindowConfig {
@@ -1088,16 +1218,22 @@ mod tests {
             vec!["test".to_string(), "parallel".to_string()],
             vec!["test".to_string()],
             vec!["parallel".to_string()],
-            vec!["test".to_string(), "parallel".to_string(), "advanced".to_string()],
+            vec![
+                "test".to_string(),
+                "parallel".to_string(),
+                "advanced".to_string(),
+            ],
         ];
 
-        let (chunk_ids, stats) = manager.add_chunks_parallel(
-            &chunks,
-            &embeddings,
-            &frame_numbers,
-            Some(&importance_scores),
-            Some(&tags),
-        ).unwrap();
+        let (chunk_ids, stats) = manager
+            .add_chunks_parallel(
+                &chunks,
+                &embeddings,
+                &frame_numbers,
+                Some(&importance_scores),
+                Some(&tags),
+            )
+            .unwrap();
 
         assert_eq!(chunk_ids.len(), 4);
         assert_eq!(stats.successful_operations, 4);
@@ -1122,7 +1258,9 @@ mod tests {
         ];
         let frame_numbers = vec![0, 1, 2];
 
-        manager.add_chunks(&chunks, &embeddings, &frame_numbers).unwrap();
+        manager
+            .add_chunks(&chunks, &embeddings, &frame_numbers)
+            .unwrap();
 
         // Update importance scores
         let mut updates = HashMap::new();
@@ -1134,13 +1272,15 @@ mod tests {
 
         // Test enhanced search with filtering
         let query = vec![1.0, 0.0, 0.0];
-        let results = manager.search_enhanced(
-            &query,
-            2,
-            None,
-            None,
-            Some(0.5), // Min importance filter
-        ).unwrap();
+        let results = manager
+            .search_enhanced(
+                &query,
+                2,
+                None,
+                None,
+                Some(0.5), // Min importance filter
+            )
+            .unwrap();
 
         // Should only return chunks with importance >= 0.5 (but may return fewer due to search results)
         assert!(results.len() <= 2); // At most chunks 0 and 2
@@ -1171,13 +1311,9 @@ mod tests {
             vec!["general".to_string()],
         ];
 
-        manager.add_chunks_parallel(
-            &chunks,
-            &embeddings,
-            &frame_numbers,
-            None,
-            Some(&tags),
-        ).unwrap();
+        manager
+            .add_chunks_parallel(&chunks, &embeddings, &frame_numbers, None, Some(&tags))
+            .unwrap();
 
         // Test tag filtering - require all tags
         let ml_chunks = manager.get_chunks_by_tags(&["ml".to_string()], false);
@@ -1185,10 +1321,8 @@ mod tests {
         assert!(ml_chunks[0].tags.contains(&"ml".to_string()));
 
         // Test tag filtering - any tag match
-        let video_or_general = manager.get_chunks_by_tags(
-            &["video".to_string(), "general".to_string()], 
-            false
-        );
+        let video_or_general =
+            manager.get_chunks_by_tags(&["video".to_string(), "general".to_string()], false);
         assert_eq!(video_or_general.len(), 2);
     }
 
@@ -1200,10 +1334,7 @@ mod tests {
             "Statistical analysis chunk".to_string(),
             "Data processing chunk".to_string(),
         ];
-        let embeddings = vec![
-            vec![1.0, 0.0, 0.0],
-            vec![0.0, 1.0, 0.0],
-        ];
+        let embeddings = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
         let frame_numbers = vec![0, 1];
         let importance_scores = vec![0.8, 0.6];
         let tags = vec![
@@ -1211,13 +1342,15 @@ mod tests {
             vec!["data".to_string(), "processing".to_string()],
         ];
 
-        manager.add_chunks_parallel(
-            &chunks,
-            &embeddings,
-            &frame_numbers,
-            Some(&importance_scores),
-            Some(&tags),
-        ).unwrap();
+        manager
+            .add_chunks_parallel(
+                &chunks,
+                &embeddings,
+                &frame_numbers,
+                Some(&importance_scores),
+                Some(&tags),
+            )
+            .unwrap();
 
         let stats = manager.get_enhanced_stats();
         assert_eq!(stats.total_chunks, 2);
@@ -1236,27 +1369,47 @@ mod tests {
         let embeddings = vec![vec![1.0, 0.0, 0.0]];
         let frame_numbers = vec![0];
 
-        let chunk_ids = manager.add_chunks(&chunks, &embeddings, &frame_numbers).unwrap();
+        let chunk_ids = manager
+            .add_chunks(&chunks, &embeddings, &frame_numbers)
+            .unwrap();
         let chunk_id = chunk_ids[0];
 
         // Test rich metadata update
         let mut rich_metadata = HashMap::new();
-        rich_metadata.insert("priority".to_string(), MetadataValue::Text("high".to_string()));
+        rich_metadata.insert(
+            "priority".to_string(),
+            MetadataValue::Text("high".to_string()),
+        );
         rich_metadata.insert("score".to_string(), MetadataValue::Number(0.95));
         rich_metadata.insert("processed".to_string(), MetadataValue::Boolean(true));
-        rich_metadata.insert("created".to_string(), MetadataValue::Timestamp(chrono::Utc::now()));
-        rich_metadata.insert("related".to_string(), MetadataValue::Reference { 
-            chunk_id: Some(123), 
-            frame_id: Some(456) 
-        });
+        rich_metadata.insert(
+            "created".to_string(),
+            MetadataValue::Timestamp(chrono::Utc::now()),
+        );
+        rich_metadata.insert(
+            "related".to_string(),
+            MetadataValue::Reference {
+                chunk_id: Some(123),
+                frame_id: Some(456),
+            },
+        );
 
-        manager.update_rich_metadata(chunk_id, rich_metadata).unwrap();
+        manager
+            .update_rich_metadata(chunk_id, rich_metadata)
+            .unwrap();
 
         let chunk = manager.get_chunk_by_id(chunk_id).unwrap();
         assert_eq!(chunk.metadata.len(), 5);
-        assert!(matches!(chunk.metadata.get("priority"), Some(MetadataValue::Text(s)) if s == "high"));
-        assert!(matches!(chunk.metadata.get("score"), Some(MetadataValue::Number(n)) if *n == 0.95));
-        assert!(matches!(chunk.metadata.get("processed"), Some(MetadataValue::Boolean(true))));
+        assert!(
+            matches!(chunk.metadata.get("priority"), Some(MetadataValue::Text(s)) if s == "high")
+        );
+        assert!(
+            matches!(chunk.metadata.get("score"), Some(MetadataValue::Number(n)) if *n == 0.95)
+        );
+        assert!(matches!(
+            chunk.metadata.get("processed"),
+            Some(MetadataValue::Boolean(true))
+        ));
     }
 
     #[tokio::test]
@@ -1295,4 +1448,4 @@ mod tests {
         let update_result = manager.update_importance_scores(invalid_updates);
         assert!(update_result.is_err());
     }
-} 
+}

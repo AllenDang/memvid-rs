@@ -4,9 +4,9 @@
 //! with O(1) chunk lookups and millions of chunks scalability.
 
 use crate::error::{MemvidError, Result};
-use crate::text::ChunkMetadata;
 use crate::storage::schema::*;
-use rusqlite::{Connection, params, Row, OptionalExtension};
+use crate::text::ChunkMetadata;
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::path::Path;
 
 /// Database connection and operations
@@ -27,8 +27,9 @@ impl Database {
 
     /// Create an in-memory database (for testing)
     pub fn memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| MemvidError::Storage(format!("Failed to create in-memory database: {}", e)))?;
+        let conn = Connection::open_in_memory().map_err(|e| {
+            MemvidError::Storage(format!("Failed to create in-memory database: {}", e))
+        })?;
 
         let mut db = Self { conn };
         db.initialize()?;
@@ -38,42 +39,56 @@ impl Database {
     /// Initialize database schema
     fn initialize(&mut self) -> Result<()> {
         // Enable WAL mode for better concurrency
-        let _: String = self.conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+        let _: String = self
+            .conn
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
             .map_err(|e| MemvidError::Storage(format!("Failed to enable WAL mode: {}", e)))?;
 
         // Create tables
-        self.conn.execute(CREATE_CHUNKS_TABLE, [])
+        self.conn
+            .execute(CREATE_CHUNKS_TABLE, [])
             .map_err(|e| MemvidError::Storage(format!("Failed to create chunks table: {}", e)))?;
 
-        self.conn.execute(CREATE_METADATA_TABLE, [])
+        self.conn
+            .execute(CREATE_METADATA_TABLE, [])
             .map_err(|e| MemvidError::Storage(format!("Failed to create metadata table: {}", e)))?;
 
         // Create indexes for O(1) lookups
-        self.conn.execute(CREATE_CHUNKS_INDEXES, [])
+        self.conn
+            .execute(CREATE_CHUNKS_INDEXES, [])
             .map_err(|e| MemvidError::Storage(format!("Failed to create indexes: {}", e)))?;
 
         // Set schema version
-        self.conn.execute(
-            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', ?)",
-            params![SCHEMA_VERSION.to_string()],
-        ).map_err(|e| MemvidError::Storage(format!("Failed to set schema version: {}", e)))?;
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', ?)",
+                params![SCHEMA_VERSION.to_string()],
+            )
+            .map_err(|e| MemvidError::Storage(format!("Failed to set schema version: {}", e)))?;
 
-        log::info!("Database initialized with schema version {}", SCHEMA_VERSION);
+        log::info!(
+            "Database initialized with schema version {}",
+            SCHEMA_VERSION
+        );
         Ok(())
     }
 
     /// Insert multiple chunks in a transaction
     pub fn insert_chunks(&mut self, chunks: &[ChunkMetadata]) -> Result<()> {
-        let tx = self.conn.transaction()
+        let tx = self
+            .conn
+            .transaction()
             .map_err(|e| MemvidError::Storage(format!("Failed to start transaction: {}", e)))?;
 
         {
-            let mut stmt = tx.prepare(
-                r#"
+            let mut stmt = tx
+                .prepare(
+                    r#"
                 INSERT INTO chunks (id, text, source, page, offset, length, frame, embedding)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
-            ).map_err(|e| MemvidError::Storage(format!("Failed to prepare statement: {}", e)))?;
+                )
+                .map_err(|e| MemvidError::Storage(format!("Failed to prepare statement: {}", e)))?;
 
             for chunk in chunks {
                 let embedding_blob = chunk.embedding.as_ref().map(|emb| {
@@ -93,7 +108,10 @@ impl Database {
                     chunk.length as i64,
                     chunk.frame.map(|f| f as i64),
                     embedding_blob,
-                ]).map_err(|e| MemvidError::Storage(format!("Failed to insert chunk {}: {}", chunk.id, e)))?;
+                ])
+                .map_err(|e| {
+                    MemvidError::Storage(format!("Failed to insert chunk {}: {}", chunk.id, e))
+                })?;
             }
         }
 
@@ -110,10 +128,10 @@ impl Database {
             "SELECT id, text, source, page, offset, length, frame, embedding FROM chunks WHERE id = ?"
         ).map_err(|e| MemvidError::Storage(format!("Failed to prepare query: {}", e)))?;
 
-        let chunk = stmt.query_row(params![chunk_id as i64], |row| {
-            self.row_to_chunk(row)
-        }).optional()
-        .map_err(|e| MemvidError::Storage(format!("Failed to query chunk: {}", e)))?;
+        let chunk = stmt
+            .query_row(params![chunk_id as i64], |row| self.row_to_chunk(row))
+            .optional()
+            .map_err(|e| MemvidError::Storage(format!("Failed to query chunk: {}", e)))?;
 
         Ok(chunk)
     }
@@ -124,13 +142,15 @@ impl Database {
             "SELECT id, text, source, page, offset, length, frame, embedding FROM chunks WHERE frame = ? ORDER BY id"
         ).map_err(|e| MemvidError::Storage(format!("Failed to prepare query: {}", e)))?;
 
-        let chunks = stmt.query_map(params![frame_number as i64], |row| {
-            self.row_to_chunk(row)
-        }).map_err(|e| MemvidError::Storage(format!("Failed to query chunks by frame: {}", e)))?;
+        let chunks = stmt
+            .query_map(params![frame_number as i64], |row| self.row_to_chunk(row))
+            .map_err(|e| MemvidError::Storage(format!("Failed to query chunks by frame: {}", e)))?;
 
         let mut result = Vec::new();
         for chunk in chunks {
-            result.push(chunk.map_err(|e| MemvidError::Storage(format!("Failed to process chunk row: {}", e)))?);
+            result.push(chunk.map_err(|e| {
+                MemvidError::Storage(format!("Failed to process chunk row: {}", e))
+            })?);
         }
 
         Ok(result)
@@ -138,11 +158,10 @@ impl Database {
 
     /// Get total chunk count
     pub fn get_chunk_count(&self) -> Result<usize> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM chunks",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| MemvidError::Storage(format!("Failed to count chunks: {}", e)))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
+            .map_err(|e| MemvidError::Storage(format!("Failed to count chunks: {}", e)))?;
 
         Ok(count as usize)
     }
@@ -154,13 +173,17 @@ impl Database {
         ).map_err(|e| MemvidError::Storage(format!("Failed to prepare search query: {}", e)))?;
 
         let search_term = format!("%{}%", query);
-        let chunks = stmt.query_map(params![search_term, limit as i64], |row| {
-            self.row_to_chunk(row)
-        }).map_err(|e| MemvidError::Storage(format!("Failed to search chunks: {}", e)))?;
+        let chunks = stmt
+            .query_map(params![search_term, limit as i64], |row| {
+                self.row_to_chunk(row)
+            })
+            .map_err(|e| MemvidError::Storage(format!("Failed to search chunks: {}", e)))?;
 
         let mut result = Vec::new();
         for chunk in chunks {
-            result.push(chunk.map_err(|e| MemvidError::Storage(format!("Failed to process search result: {}", e)))?);
+            result.push(chunk.map_err(|e| {
+                MemvidError::Storage(format!("Failed to process search result: {}", e))
+            })?);
         }
 
         Ok(result)
@@ -169,20 +192,26 @@ impl Database {
     /// Get database statistics
     pub fn get_stats(&self) -> Result<DatabaseStats> {
         let chunk_count = self.get_chunk_count()?;
-        
-        let file_size: i64 = self.conn.query_row(
-            "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
-            [],
-            |row| row.get(0)
-        ).map_err(|e| MemvidError::Storage(format!("Failed to get database size: {}", e)))?;
 
-        let max_frame: Option<i64> = self.conn.query_row(
-            "SELECT MAX(frame) FROM chunks WHERE frame IS NOT NULL",
-            [],
-            |row| row.get(0)
-        ).optional()
-        .map_err(|e| MemvidError::Storage(format!("Failed to get max frame: {}", e)))?
-        .flatten();
+        let file_size: i64 = self
+            .conn
+            .query_row(
+                "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| MemvidError::Storage(format!("Failed to get database size: {}", e)))?;
+
+        let max_frame: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT MAX(frame) FROM chunks WHERE frame IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| MemvidError::Storage(format!("Failed to get max frame: {}", e)))?
+            .flatten();
 
         Ok(DatabaseStats {
             chunk_count,
@@ -223,4 +252,4 @@ pub struct DatabaseStats {
     pub chunk_count: usize,
     pub frame_count: usize,
     pub file_size_bytes: usize,
-} 
+}

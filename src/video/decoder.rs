@@ -13,8 +13,9 @@ impl VideoDecoder {
     /// Create a new video decoder
     pub fn new() -> Result<Self> {
         // Initialize FFmpeg
-        ffmpeg_next::init().map_err(|e| MemvidError::Video(format!("FFmpeg init failed: {}", e)))?;
-        
+        ffmpeg_next::init()
+            .map_err(|e| MemvidError::Video(format!("FFmpeg init failed: {}", e)))?;
+
         Ok(Self {})
     }
 
@@ -22,7 +23,10 @@ impl VideoDecoder {
     pub async fn extract_frames(&self, video_path: &str) -> Result<Vec<DynamicImage>> {
         let path = Path::new(video_path);
         if !path.exists() {
-            return Err(MemvidError::Video(format!("Video file not found: {}", video_path)));
+            return Err(MemvidError::Video(format!(
+                "Video file not found: {}",
+                video_path
+            )));
         }
 
         log::info!("Extracting frames from video: {}", video_path);
@@ -39,14 +43,20 @@ impl VideoDecoder {
             .index();
 
         // Get video stream
-        let video_stream = input_ctx.stream(video_stream_index)
+        let video_stream = input_ctx
+            .stream(video_stream_index)
             .ok_or_else(|| MemvidError::Video("Failed to get video stream".to_string()))?;
 
         // Create decoder context
-        let context_decoder = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
-            .map_err(|e| MemvidError::Video(format!("Failed to create decoder context: {}", e)))?;
+        let context_decoder =
+            ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
+                .map_err(|e| {
+                    MemvidError::Video(format!("Failed to create decoder context: {}", e))
+                })?;
 
-        let mut decoder = context_decoder.decoder().video()
+        let mut decoder = context_decoder
+            .decoder()
+            .video()
             .map_err(|e| MemvidError::Video(format!("Failed to create video decoder: {}", e)))?;
 
         // Get frame dimensions
@@ -64,7 +74,8 @@ impl VideoDecoder {
             width,
             height,
             ffmpeg_next::software::scaling::Flags::BILINEAR,
-        ).map_err(|e| MemvidError::Video(format!("Failed to create scaler: {}", e)))?;
+        )
+        .map_err(|e| MemvidError::Video(format!("Failed to create scaler: {}", e)))?;
 
         let mut frames = Vec::new();
         let mut frame_count = 0;
@@ -72,18 +83,22 @@ impl VideoDecoder {
         // Process packets
         for (stream, packet) in input_ctx.packets() {
             if stream.index() == video_stream_index {
-                decoder.send_packet(&packet)
+                decoder
+                    .send_packet(&packet)
                     .map_err(|e| MemvidError::Video(format!("Failed to send packet: {}", e)))?;
 
-                self.receive_frames(&mut decoder, &mut scaler, &mut frames, &mut frame_count).await?;
+                self.receive_frames(&mut decoder, &mut scaler, &mut frames, &mut frame_count)
+                    .await?;
             }
         }
 
         // Flush decoder
-        decoder.send_eof()
+        decoder
+            .send_eof()
             .map_err(|e| MemvidError::Video(format!("Failed to send EOF: {}", e)))?;
-        
-        self.receive_frames(&mut decoder, &mut scaler, &mut frames, &mut frame_count).await?;
+
+        self.receive_frames(&mut decoder, &mut scaler, &mut frames, &mut frame_count)
+            .await?;
 
         log::info!("Extracted {} frames from video", frames.len());
         Ok(frames)
@@ -92,11 +107,12 @@ impl VideoDecoder {
     /// Extract specific frame by number (0-indexed)
     pub async fn extract_frame(&self, video_path: &str, frame_number: u32) -> Result<DynamicImage> {
         let frames = self.extract_frames(video_path).await?;
-        
+
         if frame_number as usize >= frames.len() {
             return Err(MemvidError::Video(format!(
-                "Frame number {} out of range (video has {} frames)", 
-                frame_number, frames.len()
+                "Frame number {} out of range (video has {} frames)",
+                frame_number,
+                frames.len()
             )));
         }
 
@@ -107,7 +123,10 @@ impl VideoDecoder {
     pub async fn get_video_info(&self, video_path: &str) -> Result<VideoInfo> {
         let path = Path::new(video_path);
         if !path.exists() {
-            return Err(MemvidError::Video(format!("Video file not found: {}", video_path)));
+            return Err(MemvidError::Video(format!(
+                "Video file not found: {}",
+                video_path
+            )));
         }
 
         // Open input video
@@ -121,10 +140,15 @@ impl VideoDecoder {
             .ok_or_else(|| MemvidError::Video("No video stream found".to_string()))?;
 
         // Get decoder context for metadata
-        let context_decoder = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
-            .map_err(|e| MemvidError::Video(format!("Failed to create decoder context: {}", e)))?;
+        let context_decoder =
+            ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())
+                .map_err(|e| {
+                    MemvidError::Video(format!("Failed to create decoder context: {}", e))
+                })?;
 
-        let decoder = context_decoder.decoder().video()
+        let decoder = context_decoder
+            .decoder()
+            .video()
             .map_err(|e| MemvidError::Video(format!("Failed to create video decoder: {}", e)))?;
 
         // Calculate duration and frame count
@@ -162,28 +186,26 @@ impl VideoDecoder {
         frame_count: &mut u32,
     ) -> Result<()> {
         let mut decoded_frame = ffmpeg_next::frame::Video::empty();
-        
+
         while decoder.receive_frame(&mut decoded_frame).is_ok() {
             let width = decoded_frame.width();
             let height = decoded_frame.height();
 
             // Create RGB frame
-            let mut rgb_frame = ffmpeg_next::frame::Video::new(
-                ffmpeg_next::format::Pixel::RGB24,
-                width,
-                height,
-            );
+            let mut rgb_frame =
+                ffmpeg_next::frame::Video::new(ffmpeg_next::format::Pixel::RGB24, width, height);
 
             // Scale/convert to RGB
-            scaler.run(&decoded_frame, &mut rgb_frame)
+            scaler
+                .run(&decoded_frame, &mut rgb_frame)
                 .map_err(|e| MemvidError::Video(format!("Failed to scale frame: {}", e)))?;
 
             // Convert to image
             let image = self.frame_to_image(&rgb_frame)?;
             frames.push(image);
-            
+
             *frame_count += 1;
-            
+
             if *frame_count % 10 == 0 {
                 log::info!("Processed {} frames", *frame_count);
             }
@@ -196,14 +218,14 @@ impl VideoDecoder {
     fn frame_to_image(&self, frame: &ffmpeg_next::frame::Video) -> Result<DynamicImage> {
         let width = frame.width();
         let height = frame.height();
-        
+
         // Get RGB data from frame
         let data = frame.data(0);
         let linesize = frame.stride(0);
-        
+
         // Create image buffer
         let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
-        
+
         for y in 0..height {
             let row_start = (y * linesize as u32) as usize;
             let row_end = row_start + (width * 3) as usize;
@@ -211,31 +233,33 @@ impl VideoDecoder {
         }
 
         // Create RGB image
-        let rgb_image = image::RgbImage::from_raw(width, height, rgb_data)
-            .ok_or_else(|| MemvidError::Video("Failed to create RGB image from frame data".to_string()))?;
+        let rgb_image = image::RgbImage::from_raw(width, height, rgb_data).ok_or_else(|| {
+            MemvidError::Video("Failed to create RGB image from frame data".to_string())
+        })?;
 
         Ok(DynamicImage::ImageRgb8(rgb_image))
     }
 
     /// Extract frames within a specific time range
     pub async fn extract_frames_range(
-        &self, 
-        video_path: &str, 
-        start_frame: u32, 
-        end_frame: u32
+        &self,
+        video_path: &str,
+        start_frame: u32,
+        end_frame: u32,
     ) -> Result<Vec<DynamicImage>> {
         let all_frames = self.extract_frames(video_path).await?;
-        
+
         let start_idx = start_frame as usize;
         let end_idx = (end_frame + 1) as usize;
-        
+
         if start_idx >= all_frames.len() {
             return Err(MemvidError::Video(format!(
-                "Start frame {} out of range (video has {} frames)", 
-                start_frame, all_frames.len()
+                "Start frame {} out of range (video has {} frames)",
+                start_frame,
+                all_frames.len()
             )));
         }
-        
+
         let end_idx = end_idx.min(all_frames.len());
         Ok(all_frames[start_idx..end_idx].to_vec())
     }
@@ -282,4 +306,4 @@ mod tests {
         let result = decoder.extract_frames("nonexistent.mp4").await;
         assert!(result.is_err());
     }
-} 
+}

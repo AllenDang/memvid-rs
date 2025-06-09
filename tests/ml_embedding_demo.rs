@@ -13,14 +13,14 @@ async fn test_model_management() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     let mut model_manager = ModelManager::new(None)?;
-    
+
     // Test basic initialization
     assert!(model_manager.cache_dir().exists());
 
     // List available models
     let models = model_manager.list_models();
     assert!(!models.is_empty());
-    
+
     // Verify model configurations
     for model in &models {
         assert!(!model.name.is_empty());
@@ -54,7 +54,7 @@ async fn test_embedding_generation() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate embeddings
     let mut embeddings = Vec::new();
-    
+
     for sentence in &test_sentences {
         let embedding = embedding_model.encode(sentence)?;
         assert!(!embedding.is_empty());
@@ -77,15 +77,15 @@ async fn test_embedding_cache() -> Result<(), Box<dyn std::error::Error>> {
     let mut embedding_model = EmbeddingModel::new(config).await?;
 
     let test_sentence = "Cache test sentence";
-    
+
     // First encoding
     let embedding1 = embedding_model.encode(test_sentence)?;
     let cache_size_after_first = embedding_model.cache_size();
-    
+
     // Second encoding (should hit cache)
     let embedding2 = embedding_model.encode(test_sentence)?;
     let cache_size_after_second = embedding_model.cache_size();
-    
+
     // Verify cache behavior
     assert_eq!(embedding1, embedding2);
     assert_eq!(cache_size_after_first, cache_size_after_second);
@@ -104,16 +104,16 @@ async fn test_batch_processing() -> Result<(), Box<dyn std::error::Error>> {
         "Batch sentence two".to_string(),
         "Batch sentence three".to_string(),
     ];
-    
+
     let batch_embeddings = embedding_model.encode_batch(&batch_sentences)?;
-    
+
     // Verify batch results
     assert_eq!(batch_embeddings.len(), batch_sentences.len());
-    
+
     for embedding in &batch_embeddings {
         assert!(!embedding.is_empty());
     }
-    
+
     // Verify cache was updated
     assert!(embedding_model.cache_size() >= batch_sentences.len());
 
@@ -126,28 +126,28 @@ async fn test_embedding_similarity() -> Result<(), Box<dyn std::error::Error>> {
     let mut embedding_model = EmbeddingModel::new(config).await?;
 
     // Test sentences with known similarities
-    let similar_sentences = vec![
-        "The cat sat on the mat",
-        "A cat was sitting on a mat",
-    ];
-    
+    let similar_sentences = vec!["The cat sat on the mat", "A cat was sitting on a mat"];
+
     let different_sentences = vec![
         "The cat sat on the mat",
         "Quantum computing uses superposition",
     ];
 
     // Generate embeddings
-    let similar_embeddings: Vec<Vec<f32>> = similar_sentences.iter()
+    let similar_embeddings: Vec<Vec<f32>> = similar_sentences
+        .iter()
         .map(|s| embedding_model.encode(s))
         .collect::<Result<Vec<_>, _>>()?;
-        
-    let different_embeddings: Vec<Vec<f32>> = different_sentences.iter()
+
+    let different_embeddings: Vec<Vec<f32>> = different_sentences
+        .iter()
         .map(|s| embedding_model.encode(s))
         .collect::<Result<Vec<_>, _>>()?;
 
     // Calculate similarities
     let similar_similarity = cosine_similarity(&similar_embeddings[0], &similar_embeddings[1]);
-    let different_similarity = cosine_similarity(&different_embeddings[0], &different_embeddings[1]);
+    let different_similarity =
+        cosine_similarity(&different_embeddings[0], &different_embeddings[1]);
 
     // With our current hash-based embeddings, we can't expect semantic similarity
     // but we can verify the similarity calculation works correctly
@@ -164,10 +164,10 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    
+
     if norm_a == 0.0 || norm_b == 0.0 {
         0.0
     } else {
         dot_product / (norm_a * norm_b)
     }
-} 
+}

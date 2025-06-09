@@ -1,6 +1,6 @@
 //! # memvid-rs
 //!
-//! A high-performance, self-contained Rust implementation of memvid, encoding text documents 
+//! A high-performance, self-contained Rust implementation of memvid, encoding text documents
 //! as QR codes within video files for efficient storage and semantic retrieval.
 //!
 //! ## Quick Start
@@ -33,24 +33,27 @@
 //! ```
 
 // Core modules
+pub mod api;
 pub mod config;
 pub mod error;
-pub mod qr;
-pub mod video;
-pub mod text;
 pub mod ml;
+pub mod qr;
 pub mod storage;
-pub mod api;
+pub mod text;
 pub mod utils;
+pub mod video;
 
 // Re-export main API types
-pub use api::{MemvidEncoder, MemvidRetriever, SearchResult, quick_chat, chat_with_memory, quick_chat_with_config, chat_with_memory_config};
+pub use api::{
+    MemvidEncoder, MemvidRetriever, SearchResult, chat_with_memory, chat_with_memory_config,
+    quick_chat, quick_chat_with_config,
+};
 pub use config::Config;
 pub use error::{MemvidError, Result};
 
 // Re-export commonly used types
-pub use text::ChunkMetadata;
 pub use storage::EncodingStats;
+pub use text::ChunkMetadata;
 
 #[cfg(test)]
 mod tests {

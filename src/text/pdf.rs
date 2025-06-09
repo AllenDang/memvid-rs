@@ -13,7 +13,7 @@ impl PdfProcessor {
     /// Extract text from a PDF file
     pub fn extract_text<P: AsRef<Path>>(path: P) -> Result<String> {
         let path = path.as_ref();
-        
+
         // Try using pdf-extract first (simpler)
         match pdf_extract::extract_text(path) {
             Ok(text) => Ok(text),
@@ -27,13 +27,13 @@ impl PdfProcessor {
     /// Extract text using lopdf (fallback method)
     fn extract_with_lopdf<P: AsRef<Path>>(path: P) -> Result<String> {
         use lopdf::Document;
-        
+
         let doc = Document::load(path)
             .map_err(|e| MemvidError::Pdf(format!("Failed to load PDF: {}", e)))?;
-        
+
         let mut text = String::new();
         let pages = doc.get_pages();
-        
+
         for (page_num, _) in pages {
             match doc.extract_text(&[page_num]) {
                 Ok(page_text) => {
@@ -45,24 +45,24 @@ impl PdfProcessor {
                 }
             }
         }
-        
+
         if text.trim().is_empty() {
             return Err(MemvidError::Pdf("No text extracted from PDF".to_string()));
         }
-        
+
         Ok(text)
     }
 
     /// Extract text with page information
     pub fn extract_text_with_pages<P: AsRef<Path>>(path: P) -> Result<Vec<(u32, String)>> {
         use lopdf::Document;
-        
+
         let doc = Document::load(path)
             .map_err(|e| MemvidError::Pdf(format!("Failed to load PDF: {}", e)))?;
-        
+
         let mut pages_text = Vec::new();
         let pages = doc.get_pages();
-        
+
         for (page_num, _) in pages {
             match doc.extract_text(&[page_num]) {
                 Ok(page_text) => {
@@ -75,11 +75,11 @@ impl PdfProcessor {
                 }
             }
         }
-        
+
         if pages_text.is_empty() {
             return Err(MemvidError::Pdf("No text extracted from PDF".to_string()));
         }
-        
+
         Ok(pages_text)
     }
 
@@ -87,12 +87,12 @@ impl PdfProcessor {
     pub fn is_pdf<P: AsRef<Path>>(path: P) -> bool {
         use std::fs::File;
         use std::io::Read;
-        
+
         let mut file = match File::open(path) {
             Ok(file) => file,
             Err(_) => return false,
         };
-        
+
         let mut buffer = [0; 4];
         match file.read_exact(&mut buffer) {
             Ok(_) => buffer == b"%PDF"[..],
@@ -103,19 +103,16 @@ impl PdfProcessor {
     /// Get PDF metadata (page count, title, etc.)
     pub fn get_metadata<P: AsRef<Path>>(path: P) -> Result<PdfMetadata> {
         use lopdf::Document;
-        
+
         let doc = Document::load(path)
             .map_err(|e| MemvidError::Pdf(format!("Failed to load PDF: {}", e)))?;
-        
+
         let page_count = doc.get_pages().len() as u32;
-        
+
         // Try to extract title from document info
         let title = Self::extract_title(&doc);
-        
-        Ok(PdfMetadata {
-            page_count,
-            title,
-        })
+
+        Ok(PdfMetadata { page_count, title })
     }
 
     /// Extract title from PDF document
@@ -137,7 +134,7 @@ impl PdfProcessor {
                 }
             }
         }
-        
+
         // Fallback: try to extract from first few lines of text
         let pages = doc.get_pages();
         if let Some((page_num, _)) = pages.into_iter().next() {
@@ -152,7 +149,7 @@ impl PdfProcessor {
                 }
             }
         }
-        
+
         None
     }
 }
@@ -162,7 +159,7 @@ impl PdfProcessor {
 pub struct PdfMetadata {
     /// Number of pages in the PDF
     pub page_count: u32,
-    
+
     /// Document title (if available)
     pub title: Option<String>,
 }
@@ -170,15 +167,15 @@ pub struct PdfMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_is_pdf_detection() {
         // Create a temporary file with PDF header
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "%PDF-1.4").unwrap();
-        
+
         assert!(PdfProcessor::is_pdf(temp_file.path()));
     }
 
@@ -187,7 +184,7 @@ mod tests {
         // Create a temporary text file
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "This is not a PDF").unwrap();
-        
+
         assert!(!PdfProcessor::is_pdf(temp_file.path()));
     }
 
@@ -195,4 +192,4 @@ mod tests {
     fn test_nonexistent_file() {
         assert!(!PdfProcessor::is_pdf("/nonexistent/file.pdf"));
     }
-} 
+}

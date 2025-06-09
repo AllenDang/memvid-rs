@@ -69,7 +69,7 @@ impl TextProcessor {
     /// Load tokenizer from model directory
     pub fn load_tokenizer<P: AsRef<Path>>(&mut self, model_dir: P) -> Result<()> {
         let tokenizer_path = model_dir.as_ref().join("tokenizer.json");
-        
+
         if tokenizer_path.exists() {
             match Tokenizer::from_file(&tokenizer_path) {
                 Ok(tokenizer) => {
@@ -80,14 +80,15 @@ impl TextProcessor {
                 Err(e) => {
                     log::warn!("Failed to load tokenizer from {:?}: {}", tokenizer_path, e);
                     Err(MemvidError::MachineLearning(format!(
-                        "Failed to load tokenizer: {}", e
+                        "Failed to load tokenizer: {}",
+                        e
                     )))
                 }
             }
         } else {
             log::warn!("Tokenizer file not found at {:?}", tokenizer_path);
             Err(MemvidError::MachineLearning(
-                "Tokenizer file not found".to_string()
+                "Tokenizer file not found".to_string(),
             ))
         }
     }
@@ -108,7 +109,7 @@ impl TextProcessor {
 
         // Basic cleaning
         processed = processed.trim().to_string();
-        
+
         // Remove excessive whitespace
         processed = processed
             .split_whitespace()
@@ -134,11 +135,8 @@ impl TextProcessor {
             let token_type_ids = encoding.get_type_ids().to_vec();
 
             // Truncate or pad to max_length
-            let (input_ids, attention_mask, token_type_ids) = self.pad_or_truncate(
-                input_ids,
-                attention_mask,
-                token_type_ids,
-            );
+            let (input_ids, attention_mask, token_type_ids) =
+                self.pad_or_truncate(input_ids, attention_mask, token_type_ids);
 
             Ok(TokenizedText {
                 input_ids,
@@ -156,7 +154,7 @@ impl TextProcessor {
     /// Tokenize multiple texts in batch
     pub fn tokenize_batch(&self, texts: &[String]) -> Result<Vec<TokenizedText>> {
         let mut results = Vec::new();
-        
+
         if let Some(ref tokenizer) = self.tokenizer {
             // Batch tokenization for efficiency
             let preprocessed: Vec<String> = texts
@@ -166,18 +164,17 @@ impl TextProcessor {
 
             let encodings = tokenizer
                 .encode_batch(preprocessed.clone(), self.config.add_special_tokens)
-                .map_err(|e| MemvidError::MachineLearning(format!("Batch tokenization failed: {}", e)))?;
+                .map_err(|e| {
+                    MemvidError::MachineLearning(format!("Batch tokenization failed: {}", e))
+                })?;
 
             for (encoding, original_text) in encodings.iter().zip(texts.iter()) {
                 let input_ids = encoding.get_ids().to_vec();
                 let attention_mask = encoding.get_attention_mask().to_vec();
                 let token_type_ids = encoding.get_type_ids().to_vec();
 
-                let (input_ids, attention_mask, token_type_ids) = self.pad_or_truncate(
-                    input_ids,
-                    attention_mask,
-                    token_type_ids,
-                );
+                let (input_ids, attention_mask, token_type_ids) =
+                    self.pad_or_truncate(input_ids, attention_mask, token_type_ids);
 
                 results.push(TokenizedText {
                     input_ids,
@@ -226,14 +223,15 @@ impl TextProcessor {
         // Simple word-based tokenization for fallback
         let words: Vec<&str> = text.split_whitespace().collect();
         let mut input_ids = Vec::new();
-        
+
         // Add CLS token if configured
         if self.config.add_special_tokens {
             input_ids.push(101); // [CLS] token ID
         }
 
         // Convert words to simple hash-based IDs (for testing)
-        for word in words.iter().take(self.config.max_length - 2) { // Leave space for special tokens
+        for word in words.iter().take(self.config.max_length - 2) {
+            // Leave space for special tokens
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             use std::hash::{Hash, Hasher};
             word.hash(&mut hasher);
@@ -252,13 +250,14 @@ impl TextProcessor {
         let token_type_ids = vec![0u32; seq_len];
 
         // Pad to max_length
-        let (input_ids, attention_mask, token_type_ids) = self.pad_or_truncate(
-            input_ids,
-            attention_mask,
-            token_type_ids,
-        );
+        let (input_ids, attention_mask, token_type_ids) =
+            self.pad_or_truncate(input_ids, attention_mask, token_type_ids);
 
-        log::debug!("Fallback tokenization: {} words -> {} tokens", words.len(), seq_len);
+        log::debug!(
+            "Fallback tokenization: {} words -> {} tokens",
+            words.len(),
+            seq_len
+        );
 
         Ok(TokenizedText {
             input_ids,
@@ -318,7 +317,7 @@ mod tests {
 
         let text = "Hello world test";
         let tokenized = processor.tokenize(text).unwrap();
-        
+
         assert!(!tokenized.input_ids.is_empty());
         assert_eq!(tokenized.input_ids.len(), max_length);
         assert_eq!(tokenized.attention_mask.len(), max_length);
@@ -339,7 +338,7 @@ mod tests {
 
         let tokenized = processor.tokenize_batch(&texts).unwrap();
         assert_eq!(tokenized.len(), 3);
-        
+
         for tokens in &tokenized {
             assert_eq!(tokens.input_ids.len(), max_length);
             assert_eq!(tokens.attention_mask.len(), max_length);
@@ -364,9 +363,9 @@ mod tests {
         let short_text = "Short";
         let tokenized = processor.tokenize(short_text).unwrap();
         assert_eq!(tokenized.input_ids.len(), 10);
-        
+
         // Check that padding tokens are 0
         let padding_start = tokenized.attention_mask.iter().position(|&x| x == 0);
         assert!(padding_start.is_some());
     }
-} 
+}

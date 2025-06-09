@@ -35,10 +35,12 @@ async fn test_complete_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     let video_path = temp_dir.path().join("round_trip_test.mp4");
     let database_path = temp_dir.path().join("round_trip_test.db");
 
-    let encoding_stats = encoder.build_video(
-        video_path.to_str().unwrap(),
-        database_path.to_str().unwrap(),
-    ).await?;
+    let encoding_stats = encoder
+        .build_video(
+            video_path.to_str().unwrap(),
+            database_path.to_str().unwrap(),
+        )
+        .await?;
 
     // Verify encoding results
     assert!(encoding_stats.total_chunks > 0);
@@ -50,7 +52,8 @@ async fn test_complete_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     let retriever = MemvidRetriever::new(
         video_path.to_str().unwrap(),
         database_path.to_str().unwrap(),
-    ).await?;
+    )
+    .await?;
 
     // Get video information
     let video_info = retriever.get_video_info().await?;
@@ -68,12 +71,12 @@ async fn test_complete_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 3: Content Verification
     // Test chunk retrieval by ID
     let mut recovered_texts = Vec::new();
-    
-         for chunk_id in 0..test_texts.len() {
-         if let Some(chunk_text) = retriever.get_chunk_by_id(chunk_id).await? {
-             recovered_texts.push(chunk_text);
-         }
-     }
+
+    for chunk_id in 0..test_texts.len() {
+        if let Some(chunk_text) = retriever.get_chunk_by_id(chunk_id).await? {
+            recovered_texts.push(chunk_text);
+        }
+    }
 
     // Phase 4: Round-Trip Validation
     // Verify that original texts match recovered texts (database retrieval)
@@ -86,20 +89,23 @@ async fn test_complete_round_trip() -> Result<(), Box<dyn std::error::Error>> {
 
     // Database retrieval should work (this is our current working functionality)
     assert!(database_success_count > 0);
-    
+
     // Calculate success rate
     let database_success_rate = (database_success_count as f64 / test_texts.len() as f64) * 100.0;
-    
+
     // Database functionality should work well
-    assert!(database_success_rate >= 50.0, "Database retrieval should work for at least 50% of texts");
+    assert!(
+        database_success_rate >= 50.0,
+        "Database retrieval should work for at least 50% of texts"
+    );
 
     Ok(())
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_search_functionality() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
-    
+
     // Setup test data with specific search terms
     let test_texts = vec![
         "Rust programming language with memory safety",
@@ -116,24 +122,31 @@ async fn test_search_functionality() -> Result<(), Box<dyn std::error::Error>> {
     let video_path = temp_dir.path().join("search_test.mp4");
     let database_path = temp_dir.path().join("search_test.db");
 
-    encoder.build_video(
-        video_path.to_str().unwrap(),
-        database_path.to_str().unwrap(),
-    ).await?;
+    encoder
+        .build_video(
+            video_path.to_str().unwrap(),
+            database_path.to_str().unwrap(),
+        )
+        .await?;
 
     // Test search
     let mut retriever = MemvidRetriever::new(
         video_path.to_str().unwrap(),
         database_path.to_str().unwrap(),
-    ).await?;
+    )
+    .await?;
 
     // Test various search queries
     let search_queries = ["Rust", "machine learning", "blockchain"];
-    
+
     for query in &search_queries {
         let results = retriever.search(query, 3).await?;
-        assert!(!results.is_empty(), "Search for '{}' should return results", query);
-        
+        assert!(
+            !results.is_empty(),
+            "Search for '{}' should return results",
+            query
+        );
+
         // Verify results format
         for (score, text) in &results {
             assert!(*score >= 0.0);
@@ -147,9 +160,9 @@ async fn test_search_functionality() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_video_and_database_properties() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
-    
+
     let test_text = "Sample text for testing video and database properties.";
-    
+
     // Encode
     let mut encoder = MemvidEncoder::new(None).await?;
     encoder.add_text(test_text, 512, 32).await?;
@@ -157,26 +170,29 @@ async fn test_video_and_database_properties() -> Result<(), Box<dyn std::error::
     let video_path = temp_dir.path().join("properties_test.mp4");
     let database_path = temp_dir.path().join("properties_test.db");
 
-    let encoding_stats = encoder.build_video(
-        video_path.to_str().unwrap(),
-        database_path.to_str().unwrap(),
-    ).await?;
+    let encoding_stats = encoder
+        .build_video(
+            video_path.to_str().unwrap(),
+            database_path.to_str().unwrap(),
+        )
+        .await?;
 
     // Verify files exist and have reasonable sizes
     assert!(video_path.exists());
     assert!(database_path.exists());
-    
+
     let video_size = std::fs::metadata(&video_path)?.len();
     let database_size = std::fs::metadata(&database_path)?.len();
-    
+
     assert!(video_size > 0);
     assert!(database_size > 0);
-    
+
     // Test retriever initialization and basic properties
     let retriever = MemvidRetriever::new(
         video_path.to_str().unwrap(),
         database_path.to_str().unwrap(),
-    ).await?;
+    )
+    .await?;
 
     let video_info = retriever.get_video_info().await?;
     assert!(video_info.width > 0);
@@ -190,4 +206,4 @@ async fn test_video_and_database_properties() -> Result<(), Box<dyn std::error::
     assert!(stats.database_size_bytes > 0);
 
     Ok(())
-} 
+}

@@ -36,24 +36,29 @@ impl MigrationManager {
     /// Create initial database schema
     fn create_initial_schema(&self) -> Result<()> {
         log::info!("Creating initial database schema at: {}", self.db_path);
-        
+
         // Create the basic tables for memvid
         let connection = rusqlite::Connection::open(&self.db_path)
             .map_err(|e| MemvidError::Storage(format!("Failed to create database: {}", e)))?;
 
         // Migration tracking table
-        connection.execute(
-            "CREATE TABLE IF NOT EXISTS migrations (
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS migrations (
                 id INTEGER PRIMARY KEY,
                 version TEXT NOT NULL UNIQUE,
                 applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
-            [],
-        ).map_err(|e| MemvidError::Storage(format!("Failed to create migrations table: {}", e)))?;
+                [],
+            )
+            .map_err(|e| {
+                MemvidError::Storage(format!("Failed to create migrations table: {}", e))
+            })?;
 
         // Chunks table
-        connection.execute(
-            "CREATE TABLE IF NOT EXISTS chunks (
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS chunks (
                 id INTEGER PRIMARY KEY,
                 text TEXT NOT NULL,
                 frame_number INTEGER NOT NULL,
@@ -63,36 +68,49 @@ impl MigrationManager {
                 importance_score REAL DEFAULT 0.5,
                 tags TEXT DEFAULT '[]'
             )",
-            [],
-        ).map_err(|e| MemvidError::Storage(format!("Failed to create chunks table: {}", e)))?;
+                [],
+            )
+            .map_err(|e| MemvidError::Storage(format!("Failed to create chunks table: {}", e)))?;
 
         // Embeddings table
-        connection.execute(
-            "CREATE TABLE IF NOT EXISTS embeddings (
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS embeddings (
                 chunk_id INTEGER PRIMARY KEY,
                 embedding BLOB NOT NULL,
                 dimension INTEGER NOT NULL,
                 FOREIGN KEY (chunk_id) REFERENCES chunks (id)
             )",
-            [],
-        ).map_err(|e| MemvidError::Storage(format!("Failed to create embeddings table: {}", e)))?;
+                [],
+            )
+            .map_err(|e| {
+                MemvidError::Storage(format!("Failed to create embeddings table: {}", e))
+            })?;
 
         // Index configuration table
-        connection.execute(
-            "CREATE TABLE IF NOT EXISTS index_config (
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS index_config (
                 id INTEGER PRIMARY KEY,
                 key TEXT NOT NULL UNIQUE,
                 value TEXT NOT NULL,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
-            [],
-        ).map_err(|e| MemvidError::Storage(format!("Failed to create index_config table: {}", e)))?;
+                [],
+            )
+            .map_err(|e| {
+                MemvidError::Storage(format!("Failed to create index_config table: {}", e))
+            })?;
 
         // Mark initial migration as applied
-        connection.execute(
-            "INSERT INTO migrations (version) VALUES (?)",
-            ["initial_schema"],
-        ).map_err(|e| MemvidError::Storage(format!("Failed to record initial migration: {}", e)))?;
+        connection
+            .execute(
+                "INSERT INTO migrations (version) VALUES (?)",
+                ["initial_schema"],
+            )
+            .map_err(|e| {
+                MemvidError::Storage(format!("Failed to record initial migration: {}", e))
+            })?;
 
         log::info!("Initial database schema created successfully");
         Ok(())
@@ -106,18 +124,21 @@ impl MigrationManager {
         // Get current version
         let mut stmt = connection
             .prepare("SELECT version FROM migrations ORDER BY applied_at DESC")
-            .map_err(|e| MemvidError::Storage(format!("Failed to prepare migration query: {}", e)))?;
+            .map_err(|e| {
+                MemvidError::Storage(format!("Failed to prepare migration query: {}", e))
+            })?;
 
         let migration_rows = stmt
-            .query_map([], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|e| MemvidError::Storage(format!("Failed to execute migration query: {}", e)))?;
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| {
+                MemvidError::Storage(format!("Failed to execute migration query: {}", e))
+            })?;
 
         let mut current_versions = Vec::new();
         for version_result in migration_rows {
-            let version = version_result
-                .map_err(|e| MemvidError::Storage(format!("Failed to read migration version: {}", e)))?;
+            let version = version_result.map_err(|e| {
+                MemvidError::Storage(format!("Failed to read migration version: {}", e))
+            })?;
             current_versions.push(version);
         }
 
@@ -133,12 +154,16 @@ impl MigrationManager {
             if !current_versions.contains(&version.to_string()) {
                 log::info!("Applying migration: {} - {}", version, description);
                 self.apply_migration(&connection, version)?;
-                
+
                 // Record migration
-                connection.execute(
-                    "INSERT INTO migrations (version) VALUES (?)",
-                    [version],
-                ).map_err(|e| MemvidError::Storage(format!("Failed to record migration {}: {}", version, e)))?;
+                connection
+                    .execute("INSERT INTO migrations (version) VALUES (?)", [version])
+                    .map_err(|e| {
+                        MemvidError::Storage(format!(
+                            "Failed to record migration {}: {}",
+                            version, e
+                        ))
+                    })?;
             }
         }
 
@@ -154,13 +179,17 @@ impl MigrationManager {
             }
             "add_metadata_columns" => {
                 // Add metadata columns to chunks table
-                let _ = connection.execute(
-                    "ALTER TABLE chunks ADD COLUMN metadata TEXT DEFAULT '{}'",
-                    [],
-                ).or_else(|_: rusqlite::Error| -> std::result::Result<usize, rusqlite::Error> {
-                    // Column might already exist, ignore error
-                    Ok(0)
-                })?;
+                let _ = connection
+                    .execute(
+                        "ALTER TABLE chunks ADD COLUMN metadata TEXT DEFAULT '{}'",
+                        [],
+                    )
+                    .or_else(
+                        |_: rusqlite::Error| -> std::result::Result<usize, rusqlite::Error> {
+                            // Column might already exist, ignore error
+                            Ok(0)
+                        },
+                    )?;
                 Ok(())
             }
             "add_search_indices" => {
@@ -179,7 +208,10 @@ impl MigrationManager {
                 )?;
                 Ok(())
             }
-            _ => Err(MemvidError::Storage(format!("Unknown migration version: {}", version)))
+            _ => Err(MemvidError::Storage(format!(
+                "Unknown migration version: {}",
+                version
+            ))),
         }
     }
 
@@ -194,9 +226,7 @@ impl MigrationManager {
 
         let version = connection
             .prepare("SELECT version FROM migrations ORDER BY applied_at DESC LIMIT 1")?
-            .query_row([], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_row([], |row| row.get::<_, String>(0))
             .optional()
             .map_err(|e| MemvidError::Storage(format!("Failed to query current version: {}", e)))?;
 
@@ -227,15 +257,15 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let manager = MigrationManager::new(db_path.to_str().unwrap());
-        
+
         let result = manager.run_migrations();
         assert!(result.is_ok());
-        
+
         // Check that database was created
         assert!(db_path.exists());
-        
+
         // Check that initial migration was recorded
         let version = manager.get_current_version().unwrap();
         assert!(version.is_some());
     }
-} 
+}
