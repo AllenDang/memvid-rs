@@ -1,6 +1,6 @@
 [package]
 name = "memvid-rs"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 authors = ["AllenDang <allengnr@gmail.com>"]
 description = "High-performance QR code video encoding for text storage and semantic retrieval"
