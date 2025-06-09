@@ -10,8 +10,8 @@ use crate::qr::decoder::QrDecoder;
 use crate::storage::database::Database;
 use crate::text::ChunkMetadata;
 use crate::video::decoder::{VideoDecoder, VideoInfo};
-use std::path::Path;
 use lru::LruCache;
+use std::path::Path;
 
 /// Search result with score and metadata
 #[derive(Debug, Clone)]
@@ -165,7 +165,7 @@ impl MemvidRetriever {
         }
 
         let mut results = Vec::new();
-        
+
         // Extract frame numbers for smart prefetching BEFORE processing chunks
         let frame_numbers_for_prefetch: Vec<u32> = valid_chunks
             .iter()
@@ -184,9 +184,13 @@ impl MemvidRetriever {
         results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         results.truncate(top_k);
 
-        log::info!("📊 TRUE SEMANTIC RESULTS: Found {} embedding-based results for query '{}'", results.len(), query);
+        log::info!(
+            "📊 TRUE SEMANTIC RESULTS: Found {} embedding-based results for query '{}'",
+            results.len(),
+            query
+        );
         log::info!("Found {} results for query '{}'", results.len(), query);
-        
+
         // 🧠 LLM-OPTIMIZED PREFETCHING: Only prefetch if this looks like an interactive session
         // In LLM scenarios, prefetching is only valuable for follow-up queries
         if !results.is_empty() && frame_numbers_for_prefetch.len() > 1 {
@@ -195,18 +199,23 @@ impl MemvidRetriever {
                 .into_iter()
                 .take(3) // Only prefetch top 3 most relevant frames
                 .collect();
-                
+
             if !limited_prefetch.is_empty() {
-                log::debug!("🧠 LLM-optimized prefetching {} most relevant frames", limited_prefetch.len());
+                log::debug!(
+                    "🧠 LLM-optimized prefetching {} most relevant frames",
+                    limited_prefetch.len()
+                );
                 // Prefetch asynchronously in background to not block LLM response
                 let video_path = self.video_path.clone();
                 tokio::spawn(async move {
                     let decoder = crate::video::decoder::VideoDecoder::new();
                     let qr_decoder = crate::qr::decoder::QrDecoder::new();
-                    
+
                     for frame_num in limited_prefetch {
                         if let Ok(decoder) = &decoder {
-                            if let Ok(frame_image) = decoder.extract_frame(&video_path, frame_num).await {
+                            if let Ok(frame_image) =
+                                decoder.extract_frame(&video_path, frame_num).await
+                            {
                                 let _ = qr_decoder.decode_image(&frame_image);
                                 // Note: We can't update the cache here due to ownership issues
                                 // This is just warming up the video decoder cache
@@ -216,7 +225,7 @@ impl MemvidRetriever {
                 });
             }
         }
-        
+
         Ok(results)
     }
 
@@ -414,42 +423,47 @@ impl MemvidRetriever {
 
     /// Prefetch frames for better performance - ASYNC PARALLEL VERSION (LLM-optimized)
     pub async fn prefetch_frames_parallel(&mut self, frame_numbers: Vec<u32>) -> Result<()> {
-        log::info!("LLM-optimized parallel prefetching {} frames", frame_numbers.len());
-        
+        log::info!(
+            "LLM-optimized parallel prefetching {} frames",
+            frame_numbers.len()
+        );
+
         // Filter out frames that are already cached
         let frames_to_fetch: Vec<u32> = frame_numbers
             .into_iter()
             .filter(|&frame_num| !self.frame_cache.contains(&frame_num))
             .collect();
-            
+
         if frames_to_fetch.is_empty() {
             log::debug!("All frames already cached, skipping prefetch");
             return Ok(());
         }
-        
+
         log::info!("Need to fetch {} new frames", frames_to_fetch.len());
-        
+
         // For LLM scenarios, use smaller batch size (3-4 frames max)
         let batch_size = std::cmp::min(3, frames_to_fetch.len());
         let mut successful_count = 0;
         let mut failed_count = 0;
-        
+
         for batch in frames_to_fetch.chunks(batch_size) {
             let mut tasks = Vec::new();
-            
+
             // Create async tasks for each frame in the batch
             for &frame_number in batch {
                 let video_path = self.video_path.clone();
                 let task = tokio::spawn(async move {
                     let video_decoder = VideoDecoder::new()?;
-                    let frame_image = video_decoder.extract_frame(&video_path, frame_number).await?;
+                    let frame_image = video_decoder
+                        .extract_frame(&video_path, frame_number)
+                        .await?;
                     let qr_decoder = QrDecoder::new();
                     let qr_result = qr_decoder.decode_image(&frame_image)?;
                     Ok::<(u32, String), MemvidError>((frame_number, qr_result.text))
                 });
                 tasks.push(task);
             }
-            
+
             // Wait for all tasks in this batch to complete
             for task in tasks {
                 match task.await {
@@ -468,12 +482,13 @@ impl MemvidRetriever {
                 }
             }
         }
-        
+
         log::info!(
-            "LLM-optimized prefetch completed: {} successful, {} failed", 
-            successful_count, failed_count
+            "LLM-optimized prefetch completed: {} successful, {} failed",
+            successful_count,
+            failed_count
         );
-        
+
         Ok(())
     }
 
@@ -517,10 +532,7 @@ impl MemvidRetriever {
     pub fn clear_cache(&mut self) {
         let old_len = self.frame_cache.len();
         self.frame_cache.clear();
-        log::info!(
-            "Frame cache cleared ({} entries removed)",
-            old_len
-        );
+        log::info!("Frame cache cleared ({} entries removed)", old_len);
     }
 
     /// Get retrieval statistics

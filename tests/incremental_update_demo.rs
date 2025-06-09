@@ -33,10 +33,9 @@ async fn demo_personal_knowledge_base_workflow() -> Result<(), Box<dyn std::erro
     encoder.add_chunks(initial_documents)?;
 
     let start_time = Instant::now();
-    let stats = encoder.build_video(
-        video_file.to_str().unwrap(),
-        index_file.to_str().unwrap(),
-    ).await?;
+    let stats = encoder
+        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+        .await?;
 
     println!("✅ Initial knowledge base created:");
     println!("   📊 Chunks: {}", stats.total_chunks);
@@ -58,17 +57,19 @@ async fn demo_personal_knowledge_base_workflow() -> Result<(), Box<dyn std::erro
         "Natural language processing enables computers to understand, interpret, and generate human language in a way that is both meaningful and useful.".to_string(),
     ];
 
-    println!("Adding {} new documents to existing knowledge base...", new_documents.len());
+    println!(
+        "Adding {} new documents to existing knowledge base...",
+        new_documents.len()
+    );
 
     let append_start = Instant::now();
-         // For demo purposes, simulate append by creating new encoder 
-     // In real implementation, this would use the append_chunks method
-     let mut new_encoder = MemvidEncoder::new(None).await?;
-     new_encoder.add_chunks(new_documents)?;
-     let append_stats = new_encoder.build_video(
-         video_file.to_str().unwrap(),
-         index_file.to_str().unwrap(),
-     ).await?;
+    // For demo purposes, simulate append by creating new encoder
+    // In real implementation, this would use the append_chunks method
+    let mut new_encoder = MemvidEncoder::new(None).await?;
+    new_encoder.add_chunks(new_documents)?;
+    let append_stats = new_encoder
+        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+        .await?;
 
     println!("✅ Documents added:");
     println!("   📊 New chunks: {}", append_stats.total_chunks);
@@ -77,7 +78,10 @@ async fn demo_personal_knowledge_base_workflow() -> Result<(), Box<dyn std::erro
 
     // Test search with expanded knowledge base
     let expanded_results = retriever.search("neural networks", 2).await?;
-    println!("   🔍 Expanded search test: found {} results", expanded_results.len());
+    println!(
+        "   🔍 Expanded search test: found {} results",
+        expanded_results.len()
+    );
 
     // PHASE 3: LLM Conversation History Storage
     println!("\n💬 PHASE 3: Storing LLM conversation history");
@@ -95,23 +99,28 @@ async fn demo_personal_knowledge_base_workflow() -> Result<(), Box<dyn std::erro
     println!("Storing {} conversation turns...", conversations.len());
 
     let conversation_start = Instant::now();
-         // For demo purposes, simulate conversation append
-     let conversation_chunks: Vec<String> = conversations
-         .into_iter()
-         .flat_map(|(human, ai)| vec![format!("Human: {}", human), format!("Assistant: {}", ai)])
-         .collect();
-     
-     let mut conv_encoder = MemvidEncoder::new(None).await?;
-     conv_encoder.add_chunks(conversation_chunks)?;
-     let conversation_stats = conv_encoder.build_video(
-         video_file.to_str().unwrap(),
-         index_file.to_str().unwrap(),
-     ).await?;
+    // For demo purposes, simulate conversation append
+    let conversation_chunks: Vec<String> = conversations
+        .into_iter()
+        .flat_map(|(human, ai)| vec![format!("Human: {}", human), format!("Assistant: {}", ai)])
+        .collect();
+
+    let mut conv_encoder = MemvidEncoder::new(None).await?;
+    conv_encoder.add_chunks(conversation_chunks)?;
+    let conversation_stats = conv_encoder
+        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+        .await?;
 
     println!("✅ Conversation history stored:");
-    println!("   💬 Conversation turns: {}", conversation_stats.total_chunks / 2);
+    println!(
+        "   💬 Conversation turns: {}",
+        conversation_stats.total_chunks / 2
+    );
     println!("   📊 Total chunks: {}", conversation_stats.total_chunks);
-    println!("   ⏱️  Time: {:.2}s", conversation_start.elapsed().as_secs_f64());
+    println!(
+        "   ⏱️  Time: {:.2}s",
+        conversation_start.elapsed().as_secs_f64()
+    );
 
     // FINAL TEST: Comprehensive search across all content
     println!("\n🔍 FINAL TEST: Comprehensive search");
@@ -123,7 +132,10 @@ async fn demo_personal_knowledge_base_workflow() -> Result<(), Box<dyn std::erro
     println!("Final knowledge base statistics:");
     println!("   📚 Total chunks: {}", final_stats.total_chunks);
     println!("   🎞️  Total frames: {}", final_stats.total_frames);
-    println!("   💾 Database size: {} KB", final_stats.database_size_bytes / 1024);
+    println!(
+        "   💾 Database size: {} KB",
+        final_stats.database_size_bytes / 1024
+    );
 
     // Test different types of queries
     let test_queries = [
@@ -170,13 +182,12 @@ async fn demo_conversation_only_workflow() -> Result<(), Box<dyn std::error::Err
     ];
 
     encoder.add_chunks(vec![
-        "Initial conversation history storage test".to_string()
+        "Initial conversation history storage test".to_string(),
     ])?;
 
-    encoder.build_video(
-        video_file.to_str().unwrap(),
-        index_file.to_str().unwrap(),
-    ).await?;
+    encoder
+        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+        .await?;
 
     // Add conversation history incrementally (simulate daily LLM usage)
     let daily_conversations = vec![
@@ -186,17 +197,16 @@ async fn demo_conversation_only_workflow() -> Result<(), Box<dyn std::error::Err
          "Quantum entanglement has applications in quantum computing, quantum cryptography, and quantum teleportation for secure communications.".to_string()),
     ];
 
-         // Simulate daily conversation append
-     let daily_chunks: Vec<String> = daily_conversations
-         .into_iter()
-         .flat_map(|(human, ai)| vec![format!("Human: {}", human), format!("Assistant: {}", ai)])
-         .collect();
-     
-     encoder.add_chunks(daily_chunks)?;
-     let conversation_stats = encoder.build_video(
-         video_file.to_str().unwrap(),
-         index_file.to_str().unwrap(),
-     ).await?;
+    // Simulate daily conversation append
+    let daily_chunks: Vec<String> = daily_conversations
+        .into_iter()
+        .flat_map(|(human, ai)| vec![format!("Human: {}", human), format!("Assistant: {}", ai)])
+        .collect();
+
+    encoder.add_chunks(daily_chunks)?;
+    let conversation_stats = encoder
+        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+        .await?;
 
     println!("Stored conversation history:");
     println!("   💬 Chunks: {}", conversation_stats.total_chunks);
@@ -204,11 +214,18 @@ async fn demo_conversation_only_workflow() -> Result<(), Box<dyn std::error::Err
 
     // Test searching through conversation history
     let mut retriever = MemvidRetriever::new(&video_file, &index_file).await?;
-    let results = retriever.search("quantum entanglement applications", 3).await?;
+    let results = retriever
+        .search("quantum entanglement applications", 3)
+        .await?;
 
     println!("Search results for past conversations:");
     for (i, (score, text)) in results.iter().enumerate() {
-        println!("   {}. [{}] {}", i + 1, score, text.chars().take(60).collect::<String>());
+        println!(
+            "   {}. [{}] {}",
+            i + 1,
+            score,
+            text.chars().take(60).collect::<String>()
+        );
     }
 
     assert!(!results.is_empty(), "Should find conversation history");
@@ -216,4 +233,4 @@ async fn demo_conversation_only_workflow() -> Result<(), Box<dyn std::error::Err
     println!("✅ Conversation storage workflow successful!");
 
     Ok(())
-} 
+}

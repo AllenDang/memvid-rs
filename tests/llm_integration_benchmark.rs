@@ -31,7 +31,9 @@ async fn benchmark_llm_conversation_pattern() -> Result<(), Box<dyn std::error::
     // Encode the knowledge base
     let mut encoder = MemvidEncoder::new(None).await?;
     encoder.add_chunks(knowledge_base)?;
-    encoder.build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap()).await?;
+    encoder
+        .build_video(video_file.to_str().unwrap(), index_file.to_str().unwrap())
+        .await?;
 
     let mut retriever = MemvidRetriever::new(&video_file, &index_file).await?;
 
@@ -41,23 +43,26 @@ async fn benchmark_llm_conversation_pattern() -> Result<(), Box<dyn std::error::
     // Simulate realistic LLM conversation patterns
     let conversation_queries = [
         "What is quantum computing?",
-        "How does machine learning work?", 
+        "How does machine learning work?",
         "Explain blockchain technology",
         "What are neural networks?",
         "Tell me about quantum supremacy",
         "How is AI different from machine learning?", // Follow-up question
-        "What applications use blockchain?", // Related follow-up
+        "What applications use blockchain?",          // Related follow-up
     ];
 
     let mut total_search_time = std::time::Duration::from_millis(0);
     let conversation_start = Instant::now();
 
-    println!("Simulating LLM conversation with {} queries...", conversation_queries.len());
+    println!(
+        "Simulating LLM conversation with {} queries...",
+        conversation_queries.len()
+    );
     println!();
 
     for (i, query) in conversation_queries.iter().enumerate() {
         let query_start = Instant::now();
-        
+
         // This simulates what the LLM chat API does
         let results = retriever.search(query, 5).await?;
         let search_duration = query_start.elapsed();
@@ -72,9 +77,16 @@ async fn benchmark_llm_conversation_pattern() -> Result<(), Box<dyn std::error::
             .join("\n\n");
 
         println!("Query {}: \"{}\"", i + 1, query);
-        println!("  📊 Found {} results in {:?}", results.len(), search_duration);
-        println!("  💾 Cache status: {} frames", retriever.get_stats()?.cached_frames);
-        
+        println!(
+            "  📊 Found {} results in {:?}",
+            results.len(),
+            search_duration
+        );
+        println!(
+            "  💾 Cache status: {} frames",
+            retriever.get_stats()?.cached_frames
+        );
+
         // Simulate LLM processing time (typical: 1-3 seconds)
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         println!();
@@ -86,28 +98,41 @@ async fn benchmark_llm_conversation_pattern() -> Result<(), Box<dyn std::error::
     println!("=========================");
     println!("Total queries: {}", conversation_queries.len());
     println!("Total search time: {:?}", total_search_time);
-    println!("Average search time: {:?}", total_search_time / conversation_queries.len() as u32);
+    println!(
+        "Average search time: {:?}",
+        total_search_time / conversation_queries.len() as u32
+    );
     println!("Total conversation time: {:?}", total_conversation_time);
-    println!("Search overhead: {:.1}% of conversation", 
+    println!(
+        "Search overhead: {:.1}% of conversation",
         (total_search_time.as_millis() as f64 / total_conversation_time.as_millis() as f64) * 100.0
     );
 
     let final_stats = retriever.get_stats()?;
-    println!("Final cache efficiency: {} frames cached", final_stats.cached_frames);
+    println!(
+        "Final cache efficiency: {} frames cached",
+        final_stats.cached_frames
+    );
 
     // Verify performance is suitable for LLM scenarios
     let avg_search_ms = total_search_time.as_millis() / conversation_queries.len() as u128;
-    assert!(avg_search_ms < 500, "Average search time should be under 500ms for smooth LLM interaction");
-    
+    assert!(
+        avg_search_ms < 500,
+        "Average search time should be under 500ms for smooth LLM interaction"
+    );
+
     // Test cache effectiveness in follow-up queries
     let follow_up_start = Instant::now();
     let _follow_up_results = retriever.search("quantum machine learning", 3).await?;
     let follow_up_duration = follow_up_start.elapsed();
-    
+
     println!("Follow-up query performance: {:?}", follow_up_duration);
-    assert!(follow_up_duration.as_millis() < 300, "Follow-up queries should be faster due to caching");
-    
+    assert!(
+        follow_up_duration.as_millis() < 300,
+        "Follow-up queries should be faster due to caching"
+    );
+
     println!("✅ Performance suitable for LLM integration!");
 
     Ok(())
-} 
+}

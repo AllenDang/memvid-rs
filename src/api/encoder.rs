@@ -493,9 +493,9 @@ impl MemvidEncoder {
         }
 
         let start_time = std::time::Instant::now();
-        
+
         log::info!(
-            "📚 INCREMENTAL UPDATE: Appending {} new chunks to existing knowledge base", 
+            "📚 INCREMENTAL UPDATE: Appending {} new chunks to existing knowledge base",
             new_chunks.len()
         );
 
@@ -503,25 +503,25 @@ impl MemvidEncoder {
         let video_decoder = crate::video::decoder::VideoDecoder::new()?;
         let video_info = video_decoder.get_video_info(existing_video_file).await?;
         let current_frame_count = video_info.frame_count;
-        
+
         log::info!("Current video has {} frames", current_frame_count);
 
         // 2. Load existing database to get chunk ID sequence
         let existing_db = crate::storage::Database::new(existing_index_file)?;
         let existing_chunk_count = existing_db.get_chunk_count()?;
-        
+
         log::info!("Current database has {} chunks", existing_chunk_count);
 
         // 3. Generate embeddings for new chunks
         log::info!("🧠 Generating embeddings for new chunks...");
         let embeddings = self.embedding_model.encode_batch(&new_chunks)?;
-        
+
         // 4. Prepare new chunk metadata with correct IDs and frame numbers
         let mut new_chunk_metadata = Vec::new();
         for (i, (text, embedding)) in new_chunks.iter().zip(embeddings.iter()).enumerate() {
             let chunk_id = existing_chunk_count + i;
             let frame_num = current_frame_count + i as u32;
-            
+
             new_chunk_metadata.push(crate::text::ChunkMetadata {
                 id: chunk_id,
                 text: text.clone(),
@@ -544,16 +544,18 @@ impl MemvidEncoder {
 
         // 6. Create temporary video with new frames
         let temp_new_video = format!("{}.new_frames.mp4", existing_video_file);
-        self.video_encoder.encode_frames(&new_qr_images, &temp_new_video).await?;
+        self.video_encoder
+            .encode_frames(&new_qr_images, &temp_new_video)
+            .await?;
 
         // 7. Concatenate videos using FFmpeg
         log::info!("Concatenating new frames to existing video...");
         let temp_combined_video = format!("{}.temp_combined.mp4", existing_video_file);
-        self.concatenate_videos(existing_video_file, &temp_new_video, &temp_combined_video).await?;
+        self.concatenate_videos(existing_video_file, &temp_new_video, &temp_combined_video)
+            .await?;
 
         // 8. Replace original video with combined video
-        std::fs::rename(&temp_combined_video, existing_video_file)
-            .map_err(MemvidError::Io)?;
+        std::fs::rename(&temp_combined_video, existing_video_file).map_err(MemvidError::Io)?;
 
         // 9. Update database with new chunks
         log::info!("Updating database with new chunks...");
@@ -565,14 +567,17 @@ impl MemvidEncoder {
         let _ = std::fs::remove_file(&temp_combined_video);
 
         let processing_time = start_time.elapsed().as_secs_f64();
-        let final_video_size = std::fs::metadata(existing_video_file).map(|m| m.len()).unwrap_or(0);
+        let final_video_size = std::fs::metadata(existing_video_file)
+            .map(|m| m.len())
+            .unwrap_or(0);
 
         log::info!(
             "✅ INCREMENTAL UPDATE COMPLETED: Added {} chunks in {:.2}s",
             new_chunks.len(),
             processing_time
         );
-        log::info!("Final video: {} frames, {} MB", 
+        log::info!(
+            "Final video: {} frames, {} MB",
             current_frame_count + new_chunks.len() as u32,
             final_video_size as f64 / 1_048_576.0
         );
@@ -586,12 +591,7 @@ impl MemvidEncoder {
     }
 
     /// Concatenate two video files using FFmpeg
-    async fn concatenate_videos(
-        &self,
-        video1: &str,
-        video2: &str,
-        output: &str,
-    ) -> Result<()> {
+    async fn concatenate_videos(&self, video1: &str, video2: &str, output: &str) -> Result<()> {
         log::info!("Concatenating {} + {} → {}", video1, video2, output);
 
         // Initialize FFmpeg
@@ -600,29 +600,38 @@ impl MemvidEncoder {
 
         // Create a concat demuxer filter - this is complex, so let's use a simpler approach
         // We'll use the filter_complex approach which is more reliable
-        
+
         // For now, implement a simple version that creates a temporary concat file
         // This is more reliable than trying to use FFmpeg's complex filter API directly
-        
+
         let concat_list_file = format!("{}.concat_list.txt", output);
         let concat_content = format!(
             "file '{}'\nfile '{}'",
-            std::path::Path::new(video1).canonicalize().unwrap().display(),
-            std::path::Path::new(video2).canonicalize().unwrap().display()
+            std::path::Path::new(video1)
+                .canonicalize()
+                .unwrap()
+                .display(),
+            std::path::Path::new(video2)
+                .canonicalize()
+                .unwrap()
+                .display()
         );
-        
-        std::fs::write(&concat_list_file, concat_content)
-            .map_err(MemvidError::Io)?;
+
+        std::fs::write(&concat_list_file, concat_content).map_err(MemvidError::Io)?;
 
         // Use system FFmpeg for concat (more reliable than ffmpeg-next for this)
         let output_status = std::process::Command::new("ffmpeg")
             .args([
-                "-f", "concat",
-                "-safe", "0", 
-                "-i", &concat_list_file,
-                "-c", "copy",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                &concat_list_file,
+                "-c",
+                "copy",
                 "-y", // Overwrite output
-                output
+                output,
             ])
             .status()
             .map_err(|e| MemvidError::Video(format!("Failed to execute ffmpeg: {}", e)))?;
@@ -650,14 +659,18 @@ impl MemvidEncoder {
         conversations: Vec<(String, String)>, // (human_message, ai_response)
     ) -> Result<EncodingStats> {
         let mut chunks = Vec::new();
-        
+
         for (i, (human_msg, ai_response)) in conversations.iter().enumerate() {
             // Format conversation as readable chunks
             chunks.push(format!("Human: {}", human_msg));
             chunks.push(format!("Assistant: {}", ai_response));
-            
+
             if i % 10 == 0 {
-                log::info!("Prepared {}/{} conversations for storage", i + 1, conversations.len());
+                log::info!(
+                    "Prepared {}/{} conversations for storage",
+                    i + 1,
+                    conversations.len()
+                );
             }
         }
 
@@ -667,7 +680,8 @@ impl MemvidEncoder {
             chunks.len()
         );
 
-        self.append_chunks(existing_video_file, existing_index_file, chunks).await
+        self.append_chunks(existing_video_file, existing_index_file, chunks)
+            .await
     }
 
     /// Append chunks from document processing
@@ -684,7 +698,8 @@ impl MemvidEncoder {
         if document_path.ends_with(".pdf") {
             self.add_pdf(std::path::Path::new(document_path)).await?;
         } else if document_path.ends_with(".txt") || document_path.ends_with(".md") {
-            self.add_text_file(std::path::Path::new(document_path)).await?;
+            self.add_text_file(std::path::Path::new(document_path))
+                .await?;
         } else {
             return Err(MemvidError::Generic(format!(
                 "Unsupported document format: {}",
@@ -696,7 +711,8 @@ impl MemvidEncoder {
         let new_chunks: Vec<String> = self.chunks.iter().map(|c| c.text.clone()).collect();
         log::info!("Extracted {} chunks from document", new_chunks.len());
 
-        self.append_chunks(existing_video_file, existing_index_file, new_chunks).await
+        self.append_chunks(existing_video_file, existing_index_file, new_chunks)
+            .await
     }
 }
 

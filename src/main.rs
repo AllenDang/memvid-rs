@@ -130,10 +130,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Chat { video, index } => {
             chat_command(video, index).await?;
         }
-        Commands::Append { video, index, inputs } => {
+        Commands::Append {
+            video,
+            index,
+            inputs,
+        } => {
             append_command(video, index, inputs).await?;
         }
-        Commands::AppendConversation { video, index, conversation_file } => {
+        Commands::AppendConversation {
+            video,
+            index,
+            conversation_file,
+        } => {
             append_conversation_command(video, index, conversation_file).await?;
         }
     }
@@ -317,10 +325,10 @@ async fn append_command(
 
         total_added_chunks += stats.total_chunks;
         total_processing_time += stats.processing_time;
-        
+
         println!(
-            "   ✅ Added {} chunks from {} in {:.2}s", 
-            stats.total_chunks, 
+            "   ✅ Added {} chunks from {} in {:.2}s",
+            stats.total_chunks,
             input.display(),
             start_time.elapsed().as_secs_f64()
         );
@@ -359,22 +367,25 @@ async fn append_conversation_command(
     }
 
     if !conversation_file.exists() {
-        eprintln!("❌ Conversation history file not found: {}", conversation_file.display());
+        eprintln!(
+            "❌ Conversation history file not found: {}",
+            conversation_file.display()
+        );
         return Ok(());
     }
 
     let mut encoder = MemvidEncoder::new(None).await?;
 
     println!("📄 Processing conversation history file...");
-    
+
     // Try to parse as JSON conversation format first
     let file_content = std::fs::read_to_string(&conversation_file)?;
-    
+
     // TODO: For now, parse JSON conversations
     // Expected format: [{"human": "...", "assistant": "..."}, ...]
     if let Ok(json_conversations) = serde_json::from_str::<Vec<serde_json::Value>>(&file_content) {
         let mut conversations = Vec::new();
-        
+
         for conv in json_conversations {
             if let (Some(human), Some(assistant)) = (
                 conv.get("human").and_then(|v| v.as_str()),
@@ -383,7 +394,7 @@ async fn append_conversation_command(
                 conversations.push((human.to_string(), assistant.to_string()));
             }
         }
-        
+
         if !conversations.is_empty() {
             let stats = encoder
                 .append_conversation_history(
@@ -392,7 +403,7 @@ async fn append_conversation_command(
                     conversations,
                 )
                 .await?;
-            
+
             println!("✅ Conversation history append complete!");
             println!("   💬 Conversation turns: {}", stats.total_chunks / 2);
             println!("   📊 Total chunks: {}", stats.total_chunks);
@@ -404,7 +415,7 @@ async fn append_conversation_command(
             eprintln!("❌ No valid conversations found in JSON file");
         }
     } else {
-        // Fallback: treat as plain text file  
+        // Fallback: treat as plain text file
         println!("📄 JSON parsing failed, treating as plain text file...");
         let stats = encoder
             .append_document_chunks(
@@ -413,7 +424,7 @@ async fn append_conversation_command(
                 conversation_file.to_str().unwrap(),
             )
             .await?;
-            
+
         println!("✅ Conversation history append complete!");
         println!("   📊 Chunks: {}", stats.total_chunks);
         println!("   🎞️  Frames: {}", stats.total_frames);
