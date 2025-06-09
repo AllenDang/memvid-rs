@@ -191,8 +191,8 @@ impl MemvidRetriever {
         );
         log::info!("Found {} results for query '{}'", results.len(), query);
 
-        // 🧠 LLM-OPTIMIZED PREFETCHING: Only prefetch if this looks like an interactive session
-        // In LLM scenarios, prefetching is only valuable for follow-up queries
+        // 🧠 LLM-OPTIMIZED PREFETCHING: Prefetch relevant frames to improve performance
+        // In LLM scenarios, prefetching helps with follow-up queries and context
         if !results.is_empty() && frame_numbers_for_prefetch.len() > 1 {
             // Use conservative prefetching for LLM scenarios
             let limited_prefetch: Vec<u32> = frame_numbers_for_prefetch
@@ -205,24 +205,8 @@ impl MemvidRetriever {
                     "🧠 LLM-optimized prefetching {} most relevant frames",
                     limited_prefetch.len()
                 );
-                // Prefetch asynchronously in background to not block LLM response
-                let video_path = self.video_path.clone();
-                tokio::spawn(async move {
-                    let decoder = crate::video::decoder::VideoDecoder::new();
-                    let qr_decoder = crate::qr::decoder::QrDecoder::new();
-
-                    for frame_num in limited_prefetch {
-                        if let Ok(decoder) = &decoder {
-                            if let Ok(frame_image) =
-                                decoder.extract_frame(&video_path, frame_num).await
-                            {
-                                let _ = qr_decoder.decode_image(&frame_image);
-                                // Note: We can't update the cache here due to ownership issues
-                                // This is just warming up the video decoder cache
-                            }
-                        }
-                    }
-                });
+                // Use the proper prefetch method that updates the cache
+                self.prefetch_frames(limited_prefetch).await?;
             }
         }
 
