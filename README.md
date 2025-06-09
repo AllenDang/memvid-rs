@@ -421,9 +421,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 🐛 **Bug reports**: [GitHub Issues](https://github.com/yourusername/memvid-rs/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/yourusername/memvid-rs/discussions)
-- 📧 **Email**: memvid-rs@example.com
+- 🐛 **Bug reports**: [GitHub Issues](https://github.com/AllenDang/memvid-rs/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/AllenDang/memvid-rs/discussions)
+- 📧 **Email**: allengnr@gmail.com
 - 📖 **Documentation**: [docs.rs/memvid-rs](https://docs.rs/memvid-rs)
 
 ---
