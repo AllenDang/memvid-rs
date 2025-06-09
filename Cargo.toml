@@ -32,9 +32,9 @@ imageproc = "0.25"  # Additional image processing algorithms
 ffmpeg-next = "7.1"  # Static FFmpeg - handles everything
 
 # Machine learning and embedding models - COMPLETE ML STACK
-candle-core = { version = "0.8", features = ["metal"] }  # GPU support built-in
-candle-nn = { version = "0.8", features = ["metal"] }
-candle-transformers = { version = "0.8", features = ["metal"] }
+candle-core = "0.8"  # Base candle support, GPU features added conditionally
+candle-nn = "0.8"
+candle-transformers = "0.8"
 tokenizers = "0.20"  # SentenceTransformer tokenization
 hf-hub = "0.3"             # HuggingFace model downloading
 safetensors = "0.4"        # Model weight loading
@@ -97,6 +97,12 @@ approx = "0.5"       # Floating point comparisons for ML tests
 default = ["metal"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+
+[package.metadata.docs.rs]
+# Disable Metal features on docs.rs (Linux environment without Metal/Objective-C support)
+no-default-features = true
+# Use CPU-only features for documentation builds
+features = []
 
 
 [[bin]]
