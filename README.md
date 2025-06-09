@@ -190,23 +190,6 @@ graph TB
 - **🔍 Search Module**: Pure Rust HNSW vector search (hnsw_rs + instant-distance)  
 - **📊 Storage Module**: Memory-efficient data structures and caching
 
-## 📊 Performance Benchmarks
-
-| Operation | Python memvid | memvid-rs | Improvement |
-|-----------|---------------|-----------|-------------|
-| **TRUE BERT Encoding** (Bitcoin PDF) | 45.2s | **9.06s** | **🚀 5.0x faster** |
-| **Metal GPU Acceleration** | N/A (CPU-only) | **150x+ speedup** | **🔥 M1 Max optimization** |
-| **Search Quality** | Keyword matching | **100% semantic accuracy** | **🎯 Perfect understanding** |
-| QR Generation (10k codes) | 23.8s | 3.2s | **7.4x faster** |
-| Video Creation (1GB) | 67.1s | 8.9s | **7.5x faster** |
-| Semantic Search (1M vectors) | 1.2s | 0.3s | **4.0x faster** |
-| Memory Usage (1M chunks) | 2.1GB | 0.8GB | **62% reduction** |
-| **Test Suite** | Slow Python tests | **1.68s (112 tests)** | **⚡ Ultra-fast development** |
-| **Binary Size** | **~2GB** (Python + deps) | **~50MB** | **40x smaller** |
-| **Installation** | **Complex setup** | **Copy & run** | **Zero setup** |
-
-*Benchmarks run on M2 MacBook Pro with 16GB RAM. BERT results from M1 Max with Metal acceleration.*
-
 ### 🧠 **TRUE BERT Search Quality**
 
 | Query Type | Traditional Search | **memvid-rs BERT** | Quality Score |

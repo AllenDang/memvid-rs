@@ -104,9 +104,9 @@ async fn test_encoding_with_chunks() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_encoder_clear() -> Result<(), Box<dyn std::error::Error>> {
     let mut encoder = MemvidEncoder::new(None).await?;
 
-    // Add some content
+    // Add some content (must be at least 100 characters to meet min_chunk_size requirement)
     encoder
-        .add_text("Test content for clearing", 100, 10)
+        .add_text("Test content for clearing that is long enough to meet the minimum chunk size requirement of 100 characters", 100, 10)
         .await?;
 
     let stats_before = encoder.get_stats();
