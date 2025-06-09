@@ -104,8 +104,128 @@ impl VideoDecoder {
         Ok(frames)
     }
 
-    /// Extract specific frame by number (0-indexed)
+    /// Extract specific frame by number (0-indexed) - EFFICIENT VERSION
     pub async fn extract_frame(&self, video_path: &str, frame_number: u32) -> Result<DynamicImage> {
+        let path = Path::new(video_path);
+        if !path.exists() {
+            return Err(MemvidError::Video(format!(
+                "Video file not found: {}",
+                video_path
+            )));
+        }
+
+        log::debug!("Extracting frame {} from video: {}", frame_number, video_path);
+
+        // Open input video
+        let mut input_ctx = ffmpeg_next::format::input(&path)
+            .map_err(|e| MemvidError::Video(format!("Failed to open video file: {}", e)))?;
+
+        // Find video stream
+        let video_stream_index = input_ctx
+            .streams()
+            .best(ffmpeg_next::media::Type::Video)
+            .ok_or_else(|| MemvidError::Video("No video stream found".to_string()))?
+            .index();
+
+        // Get video stream and extract needed parameters before borrowing mutably
+        let (time_base, avg_frame_rate, stream_parameters) = {
+            let video_stream = input_ctx
+                .stream(video_stream_index)
+                .ok_or_else(|| MemvidError::Video("Failed to get video stream".to_string()))?;
+            (video_stream.time_base(), video_stream.avg_frame_rate(), video_stream.parameters())
+        };
+
+        // Calculate timestamp for the target frame
+        let frame_duration = if avg_frame_rate.denominator() > 0 && avg_frame_rate.numerator() > 0 {
+            time_base.denominator() as f64 / (time_base.numerator() as f64 * avg_frame_rate.numerator() as f64 / avg_frame_rate.denominator() as f64)
+        } else {
+            // Fallback: assume 30 FPS
+            time_base.denominator() as f64 / (time_base.numerator() as f64 * 30.0)
+        };
+        
+        let target_timestamp = (frame_number as f64 * frame_duration) as i64;
+
+        // Seek to the target frame
+        if frame_number > 0 {
+            input_ctx.seek(target_timestamp, ..target_timestamp + (frame_duration as i64))
+                .map_err(|e| MemvidError::Video(format!("Failed to seek to frame {}: {}", frame_number, e)))?;
+        }
+
+        // Create decoder context
+        let context_decoder =
+            ffmpeg_next::codec::context::Context::from_parameters(stream_parameters)
+                .map_err(|e| {
+                    MemvidError::Video(format!("Failed to create decoder context: {}", e))
+                })?;
+
+        let mut decoder = context_decoder
+            .decoder()
+            .video()
+            .map_err(|e| MemvidError::Video(format!("Failed to create video decoder: {}", e)))?;
+
+        // Get frame dimensions
+        let width = decoder.width();
+        let height = decoder.height();
+
+        // Set up frame conversion
+        let mut scaler = ffmpeg_next::software::scaling::Context::get(
+            decoder.format(),
+            width,
+            height,
+            ffmpeg_next::format::Pixel::RGB24,
+            width,
+            height,
+            ffmpeg_next::software::scaling::Flags::BILINEAR,
+        )
+        .map_err(|e| MemvidError::Video(format!("Failed to create scaler: {}", e)))?;
+
+        let mut current_frame = 0u32;
+
+        // Process packets until we find our target frame
+        for (stream, packet) in input_ctx.packets() {
+            if stream.index() == video_stream_index {
+                decoder
+                    .send_packet(&packet)
+                    .map_err(|e| MemvidError::Video(format!("Failed to send packet: {}", e)))?;
+
+                let mut decoded_frame = ffmpeg_next::frame::Video::empty();
+                while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                    if current_frame == frame_number {
+                        // Found our target frame, convert and return it
+                        let mut rgb_frame =
+                            ffmpeg_next::frame::Video::new(ffmpeg_next::format::Pixel::RGB24, width, height);
+
+                        scaler
+                            .run(&decoded_frame, &mut rgb_frame)
+                            .map_err(|e| MemvidError::Video(format!("Failed to scale frame: {}", e)))?;
+
+                        let image = self.frame_to_image(&rgb_frame)?;
+                        
+                        log::debug!("Successfully extracted frame {} from video", frame_number);
+                        return Ok(image);
+                    }
+                    current_frame += 1;
+                    
+                    // Stop processing if we've gone past our target
+                    if current_frame > frame_number {
+                        break;
+                    }
+                }
+                
+                if current_frame > frame_number {
+                    break;
+                }
+            }
+        }
+
+        Err(MemvidError::Video(format!(
+            "Frame number {} not found (video has fewer frames or seeking failed)",
+            frame_number
+        )))
+    }
+
+    /// Extract specific frame by number (0-indexed) - DEPRECATED SLOW VERSION
+    pub async fn extract_frame_slow(&self, video_path: &str, frame_number: u32) -> Result<DynamicImage> {
         let frames = self.extract_frames(video_path).await?;
 
         if frame_number as usize >= frames.len() {
@@ -240,8 +360,140 @@ impl VideoDecoder {
         Ok(DynamicImage::ImageRgb8(rgb_image))
     }
 
-    /// Extract frames within a specific time range
+    /// Extract frames within a specific range - EFFICIENT VERSION
     pub async fn extract_frames_range(
+        &self,
+        video_path: &str,
+        start_frame: u32,
+        end_frame: u32,
+    ) -> Result<Vec<DynamicImage>> {
+        if start_frame > end_frame {
+            return Err(MemvidError::Video(format!(
+                "Invalid frame range: start {} > end {}",
+                start_frame, end_frame
+            )));
+        }
+
+        let path = Path::new(video_path);
+        if !path.exists() {
+            return Err(MemvidError::Video(format!(
+                "Video file not found: {}",
+                video_path
+            )));
+        }
+
+        log::debug!("Extracting frames {}-{} from video: {}", start_frame, end_frame, video_path);
+
+        // Open input video
+        let mut input_ctx = ffmpeg_next::format::input(&path)
+            .map_err(|e| MemvidError::Video(format!("Failed to open video file: {}", e)))?;
+
+        // Find video stream
+        let video_stream_index = input_ctx
+            .streams()
+            .best(ffmpeg_next::media::Type::Video)
+            .ok_or_else(|| MemvidError::Video("No video stream found".to_string()))?
+            .index();
+
+        // Get video stream and extract needed parameters before borrowing mutably
+        let (time_base, avg_frame_rate, stream_parameters) = {
+            let video_stream = input_ctx
+                .stream(video_stream_index)
+                .ok_or_else(|| MemvidError::Video("Failed to get video stream".to_string()))?;
+            (video_stream.time_base(), video_stream.avg_frame_rate(), video_stream.parameters())
+        };
+
+        // Calculate timestamp for the start frame
+        let frame_duration = if avg_frame_rate.denominator() > 0 && avg_frame_rate.numerator() > 0 {
+            time_base.denominator() as f64 / (time_base.numerator() as f64 * avg_frame_rate.numerator() as f64 / avg_frame_rate.denominator() as f64)
+        } else {
+            // Fallback: assume 30 FPS
+            time_base.denominator() as f64 / (time_base.numerator() as f64 * 30.0)
+        };
+        
+        let start_timestamp = (start_frame as f64 * frame_duration) as i64;
+
+        // Seek to the start frame
+        if start_frame > 0 {
+            input_ctx.seek(start_timestamp, ..start_timestamp + (frame_duration as i64))
+                .map_err(|e| MemvidError::Video(format!("Failed to seek to frame {}: {}", start_frame, e)))?;
+        }
+
+        // Create decoder context
+        let context_decoder =
+            ffmpeg_next::codec::context::Context::from_parameters(stream_parameters)
+                .map_err(|e| {
+                    MemvidError::Video(format!("Failed to create decoder context: {}", e))
+                })?;
+
+        let mut decoder = context_decoder
+            .decoder()
+            .video()
+            .map_err(|e| MemvidError::Video(format!("Failed to create video decoder: {}", e)))?;
+
+        // Get frame dimensions
+        let width = decoder.width();
+        let height = decoder.height();
+
+        // Set up frame conversion
+        let mut scaler = ffmpeg_next::software::scaling::Context::get(
+            decoder.format(),
+            width,
+            height,
+            ffmpeg_next::format::Pixel::RGB24,
+            width,
+            height,
+            ffmpeg_next::software::scaling::Flags::BILINEAR,
+        )
+        .map_err(|e| MemvidError::Video(format!("Failed to create scaler: {}", e)))?;
+
+        let mut current_frame = 0u32;
+        let mut extracted_frames = Vec::new();
+
+        // Process packets and collect frames in the range
+        for (stream, packet) in input_ctx.packets() {
+            if stream.index() == video_stream_index {
+                decoder
+                    .send_packet(&packet)
+                    .map_err(|e| MemvidError::Video(format!("Failed to send packet: {}", e)))?;
+
+                let mut decoded_frame = ffmpeg_next::frame::Video::empty();
+                while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                    if current_frame >= start_frame && current_frame <= end_frame {
+                        // Frame is in our target range, convert and store it
+                        let mut rgb_frame =
+                            ffmpeg_next::frame::Video::new(ffmpeg_next::format::Pixel::RGB24, width, height);
+
+                        scaler
+                            .run(&decoded_frame, &mut rgb_frame)
+                            .map_err(|e| MemvidError::Video(format!("Failed to scale frame: {}", e)))?;
+
+                        let image = self.frame_to_image(&rgb_frame)?;
+                        extracted_frames.push(image);
+                    }
+                    
+                    current_frame += 1;
+                    
+                    // Stop processing if we've gone past our target range
+                    if current_frame > end_frame {
+                        log::debug!("Successfully extracted {} frames ({}-{})", extracted_frames.len(), start_frame, end_frame);
+                        return Ok(extracted_frames);
+                    }
+                }
+                
+                // If we've collected all frames in range, stop processing
+                if current_frame > end_frame {
+                    break;
+                }
+            }
+        }
+
+        log::debug!("Successfully extracted {} frames ({}-{})", extracted_frames.len(), start_frame, end_frame);
+        Ok(extracted_frames)
+    }
+
+    /// Extract frames within a specific range - DEPRECATED SLOW VERSION 
+    pub async fn extract_frames_range_slow(
         &self,
         video_path: &str,
         start_frame: u32,
